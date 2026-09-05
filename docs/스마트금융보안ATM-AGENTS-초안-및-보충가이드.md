@@ -93,7 +93,7 @@
                           돈다, 3주차부터, .env.example 포함)
 ```
 각 폴더의 `.env.example`을 `.env`로 복사해 실제 값을 채운다 (`.env`는 커밋되지
-않는다 — docs/학생용-설치-및-사용-매뉴얼.md 1단계 참고).
+않는다 — docs/스마트금융보안ATM-실행-가이드.md 1장 참고).
 
 ## 팀 정보
 
@@ -333,4 +333,4 @@ backend/iot/base.py의 DeviceProvider 인터페이스를 따르는 HardwareDevic
   불필요하게 저장하지 않는 것은 이 프로젝트에도 그대로 적용됩니다)
 - `.agents/rules/db-rules.md` — 경보성 디바이스 원칙, 최소 스키마
 - `.agents/rules/api-rules.md` — 사용자향/디바이스향 인증 분리
-- `docs/학생용-설치-및-사용-매뉴얼-수정본.md`
+- `docs/윈도우-개발-핸드북.md`
