@@ -36,7 +36,7 @@ export default function MessagesPage() {
   );
 
   useEffect(() => {
-    if (!readToken()) {
+    if (!readToken("user")) {
       router.push("/login?next=/messages");
       return;
     }
@@ -86,7 +86,7 @@ export default function MessagesPage() {
             받은 문자를 목록에서 고르거나, 직접 입력할 수 있습니다.
           </p>
         </div>
-        <LogoutButton next="/login?next=/messages" />
+        <LogoutButton role="user" next="/login?next=/messages" />
       </header>
 
       <div role="tablist" className="grid grid-cols-2 gap-2 rounded-xl bg-slate-200 p-1.5">

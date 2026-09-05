@@ -36,7 +36,7 @@ export default function ResultPage() {
   }, [params.analysisId, router]);
 
   useEffect(() => {
-    if (!readToken()) {
+    if (!readToken("user")) {
       router.push("/login");
       return;
     }

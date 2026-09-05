@@ -37,20 +37,24 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const token = await api.post<TokenResponse>("/api/v1/auth/login", {
-        username,
-        password,
-      });
-      saveToken(token.access_token);
+      const token = await api.post<TokenResponse>(
+        "/api/v1/auth/login",
+        { username, password },
+        { role: null },
+      );
 
-      // 역할을 확인해 갈 수 있는 화면으로 보낸다. 조회에 실패해도 로그인 자체는
-      // 성공했으므로 기본 화면으로 진행한다.
-      let role: UserResponse["role"] = "user";
+      // 어느 역할로 로그인했는지 확인해 그 역할의 자리에만 저장한다.
+      // 이렇게 해야 사용자 창과 상담원 창이 서로를 덮어쓰지 않는다.
+      // 조회에 실패해도 로그인 자체는 성공했으므로 사용자로 보고 진행한다.
+      let me: UserResponse | null = null;
       try {
-        role = (await api.get<UserResponse>("/api/v1/users/me")).role;
+        me = await api.get<UserResponse>("/api/v1/users/me", { token: token.access_token });
       } catch {
-        role = "user";
+        me = null;
       }
+
+      const role = me?.role ?? "user";
+      saveToken(role, token.access_token, me?.display_name);
       router.push(destinationFor(role, searchParams.get("next")));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "로그인에 실패했습니다.");

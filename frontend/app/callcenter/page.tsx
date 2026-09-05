@@ -35,6 +35,7 @@ export default function CallcenterPage() {
     try {
       const rows = await api.get<CallcenterSessionResponse[]>(
         "/api/v1/callcenter/sessions?only_open=false",
+        { role: "agent" },
       );
       setSessions(rows);
       setError(null);
@@ -44,10 +45,10 @@ export default function CallcenterPage() {
         return;
       }
       if (err instanceof ApiError && err.status === 403) {
-        // 로그인은 되어 있으나 권한이 없다. 토큰이 남아 있으면 로그인 화면이 다시 뜨지
-        // 않으므로, 헤더의 '계정 바꾸기'로 전환하도록 안내한다.
+        // 상담원 토큰은 있으나 권한이 없다(사용자 계정으로 로그인한 경우).
+        // 헤더의 '로그아웃'으로 상담원 계정으로 다시 로그인하도록 안내한다.
         setError(
-          "콜센터 상담원 계정으로 로그인해야 합니다. 오른쪽 위 '계정 바꾸기'를 눌러 " +
+          "콜센터 상담원 계정으로 로그인해야 합니다. 오른쪽 위 '로그아웃'을 누른 뒤 " +
             "callcenter 계정으로 다시 로그인해 주세요.",
         );
         return;
@@ -57,7 +58,7 @@ export default function CallcenterPage() {
   }, [router]);
 
   useEffect(() => {
-    if (!readToken()) {
+    if (!readToken("agent")) {
       router.push("/login?next=/callcenter");
       return;
     }
@@ -72,7 +73,7 @@ export default function CallcenterPage() {
   const resolve = async (sessionId: string, resolution: "RELEASED" | "MAINTAINED") => {
     setBusy(true);
     try {
-      await api.post(`/api/v1/callcenter/resolve/${sessionId}`, { resolution });
+      await api.post(`/api/v1/callcenter/resolve/${sessionId}`, { resolution }, { role: "agent" });
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "처리하지 못했습니다.");
@@ -94,7 +95,7 @@ export default function CallcenterPage() {
         </div>
         <div className="flex items-center gap-3">
           <ConnectionBadge connected={connected} />
-          <LogoutButton next="/login?next=/callcenter" />
+          <LogoutButton role="agent" next="/login?next=/callcenter" />
           <button
             type="button"
             onClick={load}
