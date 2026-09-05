@@ -5,6 +5,7 @@ PRD 5.6 권장: ATM 전체 통합 전에 QR 인식을 독립적으로 먼저 검
 
 사용법
   python vision/qr_check.py                # 웹캠으로 계속 스캔 (q 키로 종료)
+  python vision/qr_check.py --camera 1     # 두 번째 카메라로 스캔 (USB 웹캠 등)
   python vision/qr_check.py sample.png     # 이미지 파일 한 장 검사
 
 설치
@@ -35,11 +36,35 @@ def check_image(path: str) -> int:
     return 0
 
 
+def _open_camera(camera_index: int) -> "cv2.VideoCapture | None":
+    """웹캠을 연다. 못 열면 None.
+
+    Windows 기본 백엔드(MSMF)는 웹캠을 여는 데 오래 걸리거나 아무 메시지 없이
+    실패하는 일이 잦아, Windows에서는 DSHOW를 먼저 시도한다.
+    pi/qr_scanner.py의 open_camera()와 같은 정책이다 — 이 스크립트는 opencv만
+    설치하면 단독으로 돌아가야 해서 일부러 pi/를 import하지 않는다.
+    """
+    candidates: list[tuple[str, int]] = []
+    if sys.platform == "win32" and hasattr(cv2, "CAP_DSHOW"):
+        candidates.append(("dshow", cv2.CAP_DSHOW))
+    candidates.append(("any", cv2.CAP_ANY))
+
+    for name, api in candidates:
+        capture = cv2.VideoCapture(camera_index, api)
+        if capture.isOpened():
+            print(f"카메라 열림 (index={camera_index}, backend={name})")
+            return capture
+        capture.release()
+    return None
+
+
 def check_webcam(camera_index: int = 0) -> int:
     """웹캠으로 계속 스캔한다."""
-    capture = cv2.VideoCapture(camera_index)
-    if not capture.isOpened():
+    capture = _open_camera(camera_index)
+    if capture is None:
         print(f"카메라를 열 수 없습니다 (index={camera_index}).")
+        print("Zoom·Teams·브라우저 등 웹캠을 쓰는 프로그램을 모두 끄고 다시 시도하세요.")
+        print("USB 웹캠을 꽂았다면 --camera 1, --camera 2 로 바꿔 봅니다.")
         return 1
 
     detector = cv2.QRCodeDetector()
@@ -81,5 +106,15 @@ def _print_session_id(data: str) -> None:
         print("  → session_id가 없습니다. 이 QR은 ATM 거래 제어에 쓸 수 없습니다.")
 
 
+def main(argv: list[str]) -> int:
+    """인자에 따라 웹캠 스캔 또는 이미지 한 장 검사를 고른다."""
+    if argv and argv[0] == "--camera":
+        if len(argv) < 2 or not argv[1].isdigit():
+            print("사용법: python vision/qr_check.py --camera <번호>")
+            return 1
+        return check_webcam(int(argv[1]))
+    return check_image(argv[0]) if argv else check_webcam()
+
+
 if __name__ == "__main__":
-    sys.exit(check_image(sys.argv[1]) if len(sys.argv) > 1 else check_webcam())
+    sys.exit(main(sys.argv[1:]))
