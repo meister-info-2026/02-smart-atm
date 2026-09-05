@@ -4,12 +4,28 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { LogIn } from "lucide-react";
 import { ApiError, api, saveToken } from "@/lib/api";
-import type { TokenResponse } from "@/types/api";
+import type { TokenResponse, UserResponse } from "@/types/api";
+
+/** 상담원만 들어갈 수 있는 화면 (backend/security/jwt_auth.py) */
+const AGENT_ONLY_PATHS = ["/callcenter"];
+
+/**
+ * 로그인 뒤 갈 화면을 정한다.
+ *
+ * `next`를 그대로 따르면, 콜센터 화면에서 사용자 계정으로 바꿔 로그인했을 때
+ * 다시 콜센터로 돌아가 또 권한 오류를 만난다. 그래서 역할이 갈 수 없는 곳이면
+ * 역할에 맞는 기본 화면으로 보낸다.
+ */
+function destinationFor(role: UserResponse["role"], next: string | null): string {
+  const home = role === "agent" ? "/callcenter" : "/messages";
+  if (!next) return home;
+  if (role !== "agent" && AGENT_ONLY_PATHS.some((p) => next.startsWith(p))) return home;
+  return next;
+}
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") ?? "/messages";
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -26,7 +42,16 @@ function LoginForm() {
         password,
       });
       saveToken(token.access_token);
-      router.push(nextPath);
+
+      // 역할을 확인해 갈 수 있는 화면으로 보낸다. 조회에 실패해도 로그인 자체는
+      // 성공했으므로 기본 화면으로 진행한다.
+      let role: UserResponse["role"] = "user";
+      try {
+        role = (await api.get<UserResponse>("/api/v1/users/me")).role;
+      } catch {
+        role = "user";
+      }
+      router.push(destinationFor(role, searchParams.get("next")));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "로그인에 실패했습니다.");
     } finally {

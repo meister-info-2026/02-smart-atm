@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Lock, RefreshCw } from "lucide-react";
 import ConnectionBadge from "@/components/dashboard/ConnectionBadge";
+import { LogoutButton } from "@/components/LogoutButton";
 import { ReasonList } from "@/components/ReasonList";
 import { RiskBadge } from "@/components/RiskBadge";
 import { useAtmSocket } from "@/hooks/useAtmSocket";
@@ -43,7 +44,12 @@ export default function CallcenterPage() {
         return;
       }
       if (err instanceof ApiError && err.status === 403) {
-        setError("콜센터 상담원 계정으로 로그인해야 합니다. (시연용 계정: callcenter)");
+        // 로그인은 되어 있으나 권한이 없다. 토큰이 남아 있으면 로그인 화면이 다시 뜨지
+        // 않으므로, 헤더의 '계정 바꾸기'로 전환하도록 안내한다.
+        setError(
+          "콜센터 상담원 계정으로 로그인해야 합니다. 오른쪽 위 '계정 바꾸기'를 눌러 " +
+            "callcenter 계정으로 다시 로그인해 주세요.",
+        );
         return;
       }
       setError(err instanceof ApiError ? err.message : "목록을 불러오지 못했습니다.");
@@ -88,6 +94,7 @@ export default function CallcenterPage() {
         </div>
         <div className="flex items-center gap-3">
           <ConnectionBadge connected={connected} />
+          <LogoutButton next="/login?next=/callcenter" />
           <button
             type="button"
             onClick={load}

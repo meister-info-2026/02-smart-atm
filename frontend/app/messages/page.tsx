@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, Inbox, PencilLine, Search } from "lucide-react";
+import { LogoutButton } from "@/components/LogoutButton";
 import { ApiError, api, readToken } from "@/lib/api";
 import type { AnalysisResponse, ChatRoomResponse, MessageResponse } from "@/types/api";
 
@@ -78,11 +79,14 @@ export default function MessagesPage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl space-y-8 px-6 py-10">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold text-slate-900">검사할 문자를 고르세요</h1>
-        <p className="text-lg text-slate-600 break-keep">
-          받은 문자를 목록에서 고르거나, 직접 입력할 수 있습니다.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold text-slate-900">검사할 문자를 고르세요</h1>
+          <p className="text-lg text-slate-600 break-keep">
+            받은 문자를 목록에서 고르거나, 직접 입력할 수 있습니다.
+          </p>
+        </div>
+        <LogoutButton next="/login?next=/messages" />
       </header>
 
       <div role="tablist" className="grid grid-cols-2 gap-2 rounded-xl bg-slate-200 p-1.5">

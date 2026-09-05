@@ -27,6 +27,8 @@ export interface UserResponse {
   id: number;
   username: string;
   display_name: string;
+  /** "user" = 일반 사용자, "agent" = 콜센터 상담원 (backend/db/models.py) */
+  role: "user" | "agent";
 }
 
 export interface ChatRoomResponse {
