@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# 위 줄은 지우지 말 것 — pip 24.x는 이 줄이 없으면 requirements.txt를 cp949로 읽어 한글 주석에서 설치가 실패한다.
 # 라즈베리파이 5 ATM 데몬 의존성
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0

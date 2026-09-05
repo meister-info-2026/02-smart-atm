@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# 위 줄은 지우지 말 것 — pip 24.x는 이 줄이 없으면 requirements.txt를 cp949로 읽어 한글 주석에서 설치가 실패한다.
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Python 3.10 ~ 3.12 (권장 버전)
