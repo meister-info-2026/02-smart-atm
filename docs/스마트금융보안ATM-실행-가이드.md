@@ -39,6 +39,16 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 > 실제 시크릿 값을 AI 채팅에 붙여넣지 않는다. 한 번이라도 붙여넣었다면 노출된 것으로
 > 보고 즉시 새로 만든다 (`.agents/rules/security-rules.md`).
 
+`pi/.env`에서 특히 두 값을 확인한다.
+
+| 값 | PC에서 돌릴 때 (1차 완성) | 라즈베리파이로 옮길 때 (2차) |
+|---|---|---|
+| `BACKEND_URL` | `http://127.0.0.1:8000` | 백엔드 PC의 로컬 IP (파이에서 localhost는 파이 자신이다) |
+| `DEVICE_API_KEY` | `backend/.env`와 **똑같은 값** | 동일 |
+
+> ⚠️ **`.env`를 고친 뒤에는 그 프로그램을 껐다 다시 켠다.** `.env`는 시작할 때 한 번만
+> 읽으므로, 값만 고치고 실행 중인 창을 그대로 두면 아무것도 달라지지 않는다.
+
 ---
 
 ## 2. 백엔드 (FastAPI + MySQL)
