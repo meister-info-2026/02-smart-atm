@@ -1,0 +1,126 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/**
+ * 화면의 안내 문구를 소리내어 읽어 준다 (FR-10 노약자 안내).
+ *
+ * 어르신은 화면보다 소리를 먼저 알아차린다. 큰 글씨만으로는 절반이다.
+ * 브라우저에 내장된 음성 합성을 쓰므로 설치할 것도, 인터넷도 필요 없다.
+ *
+ * 왜 기본이 꺼져 있나:
+ *   1) 브라우저는 사람이 화면을 한 번 누르기 전에는 소리를 막는다. 켜는 동작
+ *      자체가 그 '한 번 누르기'가 된다.
+ *   2) 전시장이 시끄럽거나 옆 부스에 방해가 되면 꺼야 한다. 끌 수 있어야 한다.
+ * 한 번 켜 두면 같은 브라우저에서는 계속 켜진 채로 남는다.
+ */
+
+const STORAGE_KEY = "smart-atm-voice";
+const LANG = "ko-KR";
+const RATE = 0.9; // 기본 속도는 어르신이 따라오기에 빠르다
+const PITCH = 1;
+
+export interface Speech {
+  /** 이 브라우저가 음성 합성을 지원하는가 (마운트 후에 정해진다) */
+  supported: boolean;
+  /** 지금 소리를 낼 것인가 */
+  enabled: boolean;
+  toggle: () => void;
+  /**
+   * 안내를 읽는다. 같은 key로 다시 부르면 읽지 않는다 —
+   * 화면이 1초마다 폴링하므로 이 검사가 없으면 같은 문장을 끝없이 반복한다.
+   */
+  announce: (key: string, text: string) => void;
+}
+
+function readStored(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "on";
+  } catch {
+    return false; // 시크릿 창 등에서 접근이 막힐 수 있다
+  }
+}
+
+function writeStored(on: boolean): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, on ? "on" : "off");
+  } catch {
+    // 저장하지 못해도 이번 세션 동안은 동작한다
+  }
+}
+
+export function useSpeech(): Speech {
+  const [supported, setSupported] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const spokenKeyRef = useRef<string | null>(null);
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
+  // localStorage와 speechSynthesis는 브라우저에만 있다 — 그려진 뒤에 확인한다
+  // (서버에서 그린 화면과 어긋나지 않게).
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    setSupported(true);
+    setEnabled(readStored());
+
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      voiceRef.current = voices.find((v) => v.lang.toLowerCase().startsWith("ko")) ?? null;
+    };
+    pickVoice();
+    // 목록이 비어 있다가 나중에 채워지는 브라우저가 있다
+    window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
+
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  const speak = useCallback((text: string) => {
+    const said = text.trim();
+    if (!said) return;
+    // 앞 문장이 남아 있으면 끊는다 — 상태가 바뀌었는데 지난 안내를 계속 읽으면 안 된다
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(said);
+    utterance.lang = LANG;
+    utterance.rate = RATE;
+    utterance.pitch = PITCH;
+    if (voiceRef.current) utterance.voice = voiceRef.current;
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const announce = useCallback(
+    (key: string, text: string) => {
+      // 꺼져 있어도 key는 기억해 둔다. 그래야 나중에 켰을 때 이미 지나간
+      // 안내를 뒤늦게 쏟아내지 않는다.
+      const isNew = spokenKeyRef.current !== key;
+      spokenKeyRef.current = key;
+      if (!isNew || !supported || !enabled) return;
+      speak(text);
+    },
+    [enabled, supported, speak],
+  );
+
+  const toggle = useCallback(() => {
+    setEnabled((prev) => {
+      const next = !prev;
+      writeStored(next);
+      if (next) {
+        // 켜는 순간 '지금 화면에 떠 있는 안내'를 다시 읽게 한다.
+        // 기억해 둔 key를 지우면 화면 쪽 effect가 곧바로 다시 읽어 준다 —
+        // "켰습니다" 같은 빈 확인음보다, 실제로 필요한 문장을 듣는 편이 낫다.
+        // (켜는 조작 자체가 브라우저가 요구하는 '사람의 조작'을 만족시킨다)
+        spokenKeyRef.current = null;
+      } else {
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  }, []);
+
+  // 매 렌더마다 새 객체를 돌려주면, 이걸 의존성으로 쓰는 쪽의 effect가 계속 다시 돈다
+  return useMemo(
+    () => ({ supported, enabled, toggle, announce }),
+    [supported, enabled, toggle, announce],
+  );
+}

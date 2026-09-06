@@ -7,10 +7,19 @@ import { ArrowLeft, Landmark, Phone } from "lucide-react";
 import { QrPanel } from "@/components/QrPanel";
 import { ReasonList } from "@/components/ReasonList";
 import { RiskBadge } from "@/components/RiskBadge";
+import { VoiceToggle } from "@/components/VoiceToggle";
+import { useSpeech } from "@/hooks/useSpeech";
 import { ApiError, api, readToken } from "@/lib/api";
 import type { AnalysisResponse } from "@/types/api";
 
 /** 위험 등급별 다음 행동 안내 (PRD 5.1: 다음 행동을 명확히 안내) */
+/** 소리로 먼저 듣게 되는 한마디 — 화면의 배지(안전/의심/위험)와 같은 말이다 */
+const RISK_SPOKEN: Record<AnalysisResponse["risk_level"], string> = {
+  SAFE: "안전한 문자입니다",
+  CAUTION: "의심스러운 문자입니다",
+  DANGER: "위험한 문자입니다",
+};
+
 const GUIDANCE: Record<AnalysisResponse["risk_level"], string> = {
   SAFE: "위험한 내용이 없습니다. 평소처럼 은행 업무를 보셔도 됩니다.",
   CAUTION: "의심스러운 표현이 있습니다. 돈을 보내기 전에 가족이나 은행에 꼭 확인하세요.",
@@ -22,6 +31,7 @@ export default function ResultPage() {
   const router = useRouter();
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const speech = useSpeech();
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +52,16 @@ export default function ResultPage() {
     }
     void load();
   }, [load, router]);
+
+  // 결과가 뜨면 판정과 다음 행동을 읽어 준다 (FR-10).
+  // 글씨를 읽기 힘든 분에게는 이 한 문장이 화면 전체보다 중요하다.
+  useEffect(() => {
+    if (!result) return;
+    speech.announce(
+      `result:${result.analysis_id}`,
+      `${RISK_SPOKEN[result.risk_level]}. ${GUIDANCE[result.risk_level]}`,
+    );
+  }, [result, speech]);
 
   if (error) {
     return (
@@ -73,7 +93,10 @@ export default function ResultPage() {
       <section className="card space-y-5 p-7">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <RiskBadge level={result.risk_level} size="lg" />
-          <span className="text-lg text-slate-500">위험 점수 {result.risk_score}점 / 100점</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-lg text-slate-500">위험 점수 {result.risk_score}점 / 100점</span>
+            <VoiceToggle speech={speech} />
+          </div>
         </div>
         <p className="text-2xl font-bold leading-relaxed text-slate-900 break-keep">
           {GUIDANCE[result.risk_level]}

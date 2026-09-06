@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Banknote, Headset, QrCode, RotateCcw, WifiOff } from "lucide-react";
+import { VoiceToggle } from "@/components/VoiceToggle";
+import { useSpeech } from "@/hooks/useSpeech";
 import { ApiError, atmDaemon } from "@/lib/api";
 import type { AtmDaemonState } from "@/types/api";
 
@@ -17,10 +19,20 @@ export default function AtmScreen() {
   const [state, setState] = useState<AtmDaemonState | null>(null);
   const [daemonError, setDaemonError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const speech = useSpeech();
+  const lastStateRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setState(await atmDaemon.get<AtmDaemonState>("/state"));
+      const next = await atmDaemon.get<AtmDaemonState>("/state");
+      // 상태가 바뀌면 직전 안내(예: "현금이 나오지 않습니다")는 치운다.
+      // 상담원이 제한을 풀어 화면이 초록으로 바뀌었는데 그 문구가 남아 있으면
+      // 어르신은 아직 막혀 있다고 읽는다.
+      if (lastStateRef.current !== null && lastStateRef.current !== next.state) {
+        setNotice(null);
+      }
+      lastStateRef.current = next.state;
+      setState(next);
       setDaemonError(null);
     } catch (err) {
       setDaemonError(
@@ -34,6 +46,25 @@ export default function AtmScreen() {
     const timer = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  // 지금 화면에서 가장 중요한 한 문장을 읽는다.
+  // 방금 일어난 일(notice) > 오류 > 평상시 안내 순서다.
+  useEffect(() => {
+    if (notice) {
+      speech.announce(`notice:${notice}`, notice);
+      return;
+    }
+    if (state?.last_error) {
+      speech.announce(`error:${state.last_error}`, state.last_error);
+      return;
+    }
+    if (state) {
+      speech.announce(
+        `state:${state.state}:${state.callcenter_resolution ?? "-"}`,
+        state.guidance,
+      );
+    }
+  }, [notice, state, speech]);
 
   const withdraw = async (amount: number) => {
     setNotice(null);
@@ -154,16 +185,19 @@ export default function AtmScreen() {
         </p>
       )}
 
-      <footer className="flex w-full items-center justify-between gap-4 pt-4 text-lg text-slate-500">
+      <footer className="flex w-full flex-wrap items-center justify-between gap-4 pt-4 text-lg text-slate-500">
         <span className="font-mono">{state.session_id ?? "세션 없음"}</span>
-        <button
-          type="button"
-          onClick={reset}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-200"
-        >
-          <RotateCcw size={20} aria-hidden />
-          처음으로
-        </button>
+        <div className="flex items-center gap-3">
+          <VoiceToggle speech={speech} />
+          <button
+            type="button"
+            onClick={reset}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-200"
+          >
+            <RotateCcw size={20} aria-hidden />
+            처음으로
+          </button>
+        </div>
       </footer>
     </AtmShell>
   );
