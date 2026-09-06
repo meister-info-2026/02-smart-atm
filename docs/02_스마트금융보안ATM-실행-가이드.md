@@ -111,6 +111,11 @@ curl -X POST http://localhost:8100/qr \
 ```
 
 ### 4-2. 라즈베리파이 5로 옮길 때
+**`pi/` 폴더만 복사하면 안 된다.** `pi/main.py`는 장치 제어 Provider를
+`backend/iot/`에서 가져오므로, 파이에도 저장소를 통째로 받아야 한다
+(`git clone` 또는 `backend/`와 `pi/`를 같은 상위 폴더에 나란히 둔다).
+`pi/`만 옮기면 실행하자마자 `ModuleNotFoundError: No module named 'iot'`가 난다.
+
 ```bash
 pip install gpiozero lgpio        # Pi 5는 RP1 칩이라 lgpio 핀 팩토리가 필요하다
 ```
@@ -191,6 +196,7 @@ python scripts/demo_e2e.py
 | 로그인이 계속 401 | `python -m db.seed`를 안 돌렸거나 비밀번호가 다르다. seed 출력 확인 |
 | ATM API가 401 | `pi/.env`와 `backend/.env`의 `DEVICE_API_KEY`가 다르다 |
 | 파이에서 백엔드에 못 붙는다 | `BACKEND_URL`이 `localhost`로 되어 있다. PC의 실제 IP로 바꾼다 |
+| 파이에서 `ModuleNotFoundError: No module named 'iot'` | `pi/`만 복사했다. `backend/`가 같은 상위 폴더에 나란히 있어야 한다 (4-2 참고) |
 | `gpiozero` 오류 | Pi 5는 `lgpio`가 필요하다. `pip install lgpio` 후 `GPIOZERO_PIN_FACTORY=lgpio` |
 | 카메라를 못 연다 | `ENABLE_CAMERA=false`로 두고 `POST /qr`로 먼저 로직을 검증한다 |
 | QR이 잘 안 읽힌다 | 휴대폰 화면 밝기를 올리고 QR을 크게 표시한다. 초점 거리를 20cm 이상 둔다 |
