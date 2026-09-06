@@ -193,6 +193,7 @@ python scripts/demo_e2e.py
 | 증상 | 원인 · 해결 |
 |---|---|
 | 화면은 뜨는데 목록이 비어 있다 | CORS. 백엔드 `CORS_ORIGINS`에 브라우저 주소를 정확히 넣는다 |
+| 콜센터 화면에 "실시간 이벤트 연결이 거부되었습니다" | `/ws`는 상담원 토큰을 요구한다. `callcenter` 계정으로 다시 로그인한다 (일반 사용자 계정으로는 붙을 수 없다) |
 | 로그인이 계속 401 | `python -m db.seed`를 안 돌렸거나 비밀번호가 다르다. seed 출력 확인 |
 | ATM API가 401 | `pi/.env`와 `backend/.env`의 `DEVICE_API_KEY`가 다르다 |
 | 파이에서 백엔드에 못 붙는다 | `BACKEND_URL`이 `localhost`로 되어 있다. PC의 실제 IP로 바꾼다 |

@@ -13,15 +13,17 @@ if PARENT_DIR not in sys.path:
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.status import WS_1008_POLICY_VIOLATION
 
 from config import get_settings
-from db.database import init_db
+from db.database import SessionLocal, init_db
 from routers import analysis, atm, auth, callcenter, chats, friends, health, users
+from security.jwt_auth import agent_from_token
 from websocket_manager import ws_manager
 
 settings = get_settings()
@@ -105,8 +107,26 @@ async def root():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """실시간 ATM/콜센터 상태 스트리밍용 WebSocket 엔드포인트"""
+async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(default=None)):
+    """실시간 ATM/콜센터 상태 스트리밍용 WebSocket 엔드포인트.
+
+    콜센터 상담원 화면 전용이다. 흘러가는 이벤트에 세션 번호와 위험 등급이 들어
+    있어서, REST 쪽 콜센터 API와 같은 기준으로 상담원만 받는다
+    (`require_callcenter_agent`와 짝을 이룬다).
+
+    토큰은 `?token=<JWT>`로 받는다 — 브라우저 WebSocket API는 요청 헤더를 붙일 수
+    없어 Authorization 헤더를 쓸 수 없다.
+    """
+    with SessionLocal() as db:  # 인증에만 쓰고 바로 닫는다 (연결 내내 붙들지 않는다)
+        agent = agent_from_token(db, token)
+    if agent is None:
+        # 이유(1008)를 알려 주려면 핸드셰이크를 먼저 받아야 한다. accept 전에 닫으면
+        # HTTP 403으로 끊겨서, 브라우저 쪽에서는 '서버가 죽음'과 구별할 수 없다.
+        # 화면이 "권한 없음"과 "연결 끊김"을 다르게 안내할 수 있어야 한다.
+        await websocket.accept()
+        await websocket.close(code=WS_1008_POLICY_VIOLATION)
+        return
+
     await ws_manager.connect(websocket)
     try:
         while True:

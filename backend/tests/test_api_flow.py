@@ -3,7 +3,10 @@
 문자 분석 → QR용 session_id → ATM 서버 검증 → 출금 제한 → 콜센터 확인까지
 한 번에 이어지는지 확인한다.
 """
+import pytest
 from fastapi.testclient import TestClient
+from starlette.status import WS_1008_POLICY_VIOLATION
+from starlette.websockets import WebSocketDisconnect
 
 NORMAL_MESSAGE = "오늘 오후 3시에 병원 예약이 있습니다."
 PHISHING_MESSAGE = (
@@ -367,3 +370,127 @@ def test_session_id_survives_deleted_rows(
 
     again = _analyze(client, user_headers, PHISHING_MESSAGE)
     assert again["session_id"] != newer["session_id"]
+
+
+# ── WebSocket 인증 (콜센터 화면 전용 스트림) ─────────────────────────────────
+def _ws_connect(client: TestClient, token: str | None):
+    """토큰을 쿼리로 붙여 /ws에 붙는다 (브라우저 WebSocket과 같은 방식)."""
+    path = "/ws" if token is None else f"/ws?token={token}"
+    return client.websocket_connect(path)
+
+
+def _token_of(client: TestClient, username: str) -> str:
+    return client.post(
+        "/api/v1/auth/login", json={"username": username, "password": "test1234"}
+    ).json()["data"]["access_token"]
+
+
+def _assert_ws_rejected(client: TestClient, token: str | None) -> None:
+    """붙지 못하고, 그 이유가 1008(권한 없음)로 전달되는지 확인한다.
+
+    코드까지 보는 이유: 이유 없이 끊기면 화면은 '권한 없음'과 '서버가 죽음'을
+    구별하지 못해, 3초마다 영원히 재연결을 시도하게 된다.
+    """
+    with pytest.raises(WebSocketDisconnect) as rejected:
+        with _ws_connect(client, token) as ws:
+            ws.receive_json()
+    assert rejected.value.code == WS_1008_POLICY_VIOLATION
+
+
+def test_websocket_rejects_connection_without_token(client: TestClient) -> None:
+    """토큰 없이 붙으면 이벤트 스트림을 받을 수 없다.
+
+    이 스트림에는 세션 번호와 위험 등급이 흐른다 — 같은 네트워크에 있다는 이유로
+    누구나 구독할 수 있으면 안 된다.
+    """
+    _assert_ws_rejected(client, None)
+
+
+def test_websocket_rejects_non_agent_token(client: TestClient) -> None:
+    """일반 사용자 토큰으로도 붙을 수 없다 (콜센터 REST API와 같은 기준)."""
+    _assert_ws_rejected(client, _token_of(client, "halmeoni"))
+
+
+def test_websocket_rejects_garbage_token(client: TestClient) -> None:
+    """서명이 맞지 않는 토큰은 거절한다."""
+    _assert_ws_rejected(client, "not-a-real-jwt")
+
+
+def test_websocket_accepts_agent_and_streams_atm_events(
+    client: TestClient,
+    user_headers: dict[str, str],
+    callcenter_headers: dict[str, str],
+    device_headers: dict[str, str],
+) -> None:
+    """상담원 토큰이면 붙을 수 있고, ATM 스캔이 그대로 흘러 들어온다."""
+    analysis = _analyze(client, user_headers, PHISHING_MESSAGE)
+    session_id = analysis["session_id"]
+
+    with _ws_connect(client, _token_of(client, "callcenter")) as ws:
+        client.post(
+            "/api/v1/atm/scan",
+            json={"session_id": session_id, "atm_status": "CALL_CENTER"},
+            headers=device_headers,
+        )
+        event = ws.receive_json()
+        assert event["type"] == "atm_scan"
+        assert event["session_id"] == session_id
+        assert event["risk_level"] == "DANGER"
+
+        client.post(
+            f"/api/v1/callcenter/resolve/{session_id}",
+            json={"resolution": "MAINTAINED"},
+            headers=callcenter_headers,
+        )
+        resolved = ws.receive_json()
+        assert resolved["type"] == "callcenter_resolved"
+        assert resolved["callcenter_resolution"] == "MAINTAINED"
+
+
+# ── 세션 번호는 DB가 배정한 id에서 나온다 ────────────────────────────────────
+def test_session_id_is_derived_from_row_id(
+    client: TestClient, user_headers: dict[str, str]
+) -> None:
+    """번호를 직접 세지 않고 행 id에서 만든다 — 그래서 절대 겹치지 않는다."""
+    from db.database import SessionLocal
+    from db.models import AtmSession
+    from services import format_session_id
+
+    analysis = _analyze(client, user_headers, PHISHING_MESSAGE)
+    with SessionLocal() as db:
+        row = (
+            db.query(AtmSession)
+            .filter(AtmSession.session_id == analysis["session_id"])
+            .one()
+        )
+        assert row.session_id == format_session_id(row.id)
+        assert "pending" not in row.session_id  # 임시값이 남아 있으면 안 된다
+
+
+def test_concurrent_analysis_never_collides(
+    client: TestClient, user_headers: dict[str, str]
+) -> None:
+    """동시에 들어온 분석 요청이 같은 세션 번호를 집지 않는다.
+
+    번호를 '지금까지의 최댓값 + 1'로 세면, 두 요청이 같은 값을 읽고 둘 다 쓰려다
+    한쪽이 UNIQUE 제약에 걸려 500으로 실패할 수 있다.
+
+    다만 테스트용 SQLite는 쓰기를 사실상 한 줄로 세워 처리해서, 이 테스트만으로는
+    경합을 재현하지 못한다 — 실제 보증은 위의 test_session_id_is_derived_from_row_id가
+    한다(번호를 DB가 배정한 id에서 그대로 가져오므로 겹칠 수가 없다). 이 테스트는
+    "직접 세는 방식으로 되돌아가지 않았는지" 지키는 회귀 그물이다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def analyze_once(_: int):
+        response = client.post(
+            "/api/v1/analysis", json={"message": PHISHING_MESSAGE}, headers=user_headers
+        )
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(analyze_once, range(8)))
+
+    assert [code for code, _ in results] == [200] * 8, results
+    session_ids = [body["data"]["session_id"] for _, body in results]
+    assert len(set(session_ids)) == len(session_ids), session_ids

@@ -25,7 +25,7 @@ const ATM_STATUS_LABEL: Record<string, string> = {
  */
 export default function CallcenterPage() {
   const router = useRouter();
-  const { connected, events } = useAtmSocket();
+  const { connected, unauthorized, events } = useAtmSocket();
   const [sessions, setSessions] = useState<CallcenterSessionResponse[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +110,14 @@ export default function CallcenterPage() {
       {error && (
         <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-base text-rose-800">
           {error}
+        </p>
+      )}
+
+      {/* 목록은 보이는데 실시간 이벤트만 안 들어오는 상태를 구분해서 알려 준다 */}
+      {unauthorized && !error && (
+        <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-base text-amber-900">
+          실시간 이벤트 연결이 거부되었습니다. 상담원 계정으로 다시 로그인해 주세요.
+          (목록은 &lsquo;새로고침&rsquo;으로 계속 볼 수 있습니다.)
         </p>
       )}
 

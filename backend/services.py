@@ -3,7 +3,8 @@
 라우터는 HTTP 처리만 하고, 실제 판정/세션 생성은 여기에 모은다
 (coding-standards.md: 한 함수는 한 가지 일만 한다).
 """
-from sqlalchemy import func
+from uuid import uuid4
+
 from sqlalchemy.orm import Session
 
 from analysis.rules import analyze_message, risk_level_to_action
@@ -28,15 +29,20 @@ _ACTION_TO_STATUS: dict[str, str] = {
 }
 
 
-def next_session_id(db: Session) -> str:
-    """다음 ATM 세션 ID를 만든다 (예: VP-000003).
+def format_session_id(row_id: int) -> str:
+    """세션 행의 id를 QR에 넣을 번호로 만든다 (예: 3 → VP-000003)."""
+    return f"{SESSION_ID_PREFIX}{row_id:0{SESSION_ID_DIGITS}d}"
 
-    행 개수가 아니라 가장 큰 id를 기준으로 센다. 개수로 세면 세션을 한 건이라도
-    지운 뒤에는 이미 쓴 번호가 다시 나와, session_id UNIQUE 제약에 걸려 그 뒤
-    모든 분석 요청이 실패한다 (시연 정리하다 흔히 겪는다).
+
+def _pending_session_id() -> str:
+    """번호를 배정받기 전 잠깐 채워 두는 임시값.
+
+    session_id는 NOT NULL이라 INSERT 시점에 뭔가는 들어가야 하는데, 이 시점에는
+    아직 행 id를 모른다. 두 요청이 동시에 들어와도 서로 부딪히지 않도록
+    임시값도 매번 다른 값을 쓴다. 같은 트랜잭션 안에서만 존재하고 커밋 전에
+    진짜 번호로 바뀐다.
     """
-    last_id = db.query(func.max(AtmSession.id)).scalar() or 0
-    return f"{SESSION_ID_PREFIX}{last_id + 1:0{SESSION_ID_DIGITS}d}"
+    return f"pending-{uuid4().hex}"
 
 
 def action_to_atm_status(action: str) -> str:
@@ -74,12 +80,20 @@ def run_analysis(
     db.add(analysis)
     db.flush()  # analysis.id 확보
 
+    # 번호는 DB가 배정한 행 id에서 그대로 끌어온다.
+    # 직접 세어서(개수든 최댓값이든) 매기면 두 가지가 깨진다 —
+    #   (1) 세션을 지우면 이미 쓴 번호가 다시 나온다
+    #   (2) 두 요청이 동시에 들어오면 같은 번호를 집는다
+    # 둘 다 session_id UNIQUE 제약에 걸려 분석 요청이 500으로 실패한다.
+    # id는 DB가 원자적으로 배정하므로 어느 쪽도 일어나지 않는다.
     session = AtmSession(
-        session_id=next_session_id(db),
+        session_id=_pending_session_id(),
         analysis_id=analysis.id,
         atm_status=action_to_atm_status(action),
     )
     db.add(session)
+    db.flush()  # 여기서 session.id가 정해진다
+    session.session_id = format_session_id(session.id)
     db.commit()
     db.refresh(analysis)
     db.refresh(session)
