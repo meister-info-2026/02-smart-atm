@@ -93,7 +93,7 @@
                           돈다, 3주차부터, .env.example 포함)
 ```
 각 폴더의 `.env.example`을 `.env`로 복사해 실제 값을 채운다 (`.env`는 커밋되지
-않는다 — docs/스마트금융보안ATM-실행-가이드.md 1장 참고).
+않는다 — docs/학생용-설치-및-사용-매뉴얼.md 1단계 참고).
 
 ## 팀 정보
 
@@ -327,10 +327,10 @@ backend/iot/base.py의 DeviceProvider 인터페이스를 따르는 HardwareDevic
 - 이 문서는 팀의 「프로젝트 개발 계획서」/PRD(스마트 금융 보안 ATM) 검토를 바탕으로
   작성되었습니다. PRD에 없는 내용은 임의로 만들지 않고 `[미정]`으로 남겼습니다 —
   실제 값은 팀이 채웁니다.
-- `docs/백엔드-라즈베리파이5-연동-인터페이스-가이드.md` — desired-state 폴링 계약
+- `docs/부록A_라즈베리파이5-연동-인터페이스-가이드.md` — desired-state 폴링 계약
   (2-2절의 세션 상태 폴링이 동일한 패턴을 따릅니다)
 - `.agents/rules/vision-rules.md` — 개인정보 보호 원칙(문자 원문·개인정보를
   불필요하게 저장하지 않는 것은 이 프로젝트에도 그대로 적용됩니다)
 - `.agents/rules/db-rules.md` — 경보성 디바이스 원칙, 최소 스키마
 - `.agents/rules/api-rules.md` — 사용자향/디바이스향 인증 분리
-- `docs/윈도우-개발-핸드북.md`
+- `docs/학생용-설치-및-사용-매뉴얼-수정본.md`

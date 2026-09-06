@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>라즈베리파이 5 ↔ 백엔드 연동 입문 가이드 (ELI5)</title>
+  
+  <!-- Fonts: Inter & Pretendard -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+  <!-- Icons: Phosphor Icons & Lucide Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    :root {
+      --bg-canvas: #F0F2F5;
+      --bg-card: #FFFFFF;
+      --bg-subtle: #F7F8FA;
+      --border-subtle: #E4E6EB;
+      --border-hover: #CED0D4;
+      
+      --text-primary: #050505;
+      --text-secondary: #65676B;
+      --text-tertiary: #8A8D91;
+      
+      --meta-blue: #0064E0;
+      --meta-blue-hover: #0056C7;
+      --meta-blue-light: #E7F3FF;
+      --meta-blue-border: #C8E1FF;
+
+      --safe-green: #00A400;
+      --safe-green-light: #E7F8E8;
+      --caution-orange: #FA8C16;
+      --caution-orange-light: #FFF7E6;
+      --danger-red: #FA383E;
+      --danger-red-light: #FDE8E8;
+      
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-xl: 28px;
+      
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+      --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+      --shadow-float: 0 12px 36px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.06);
+
+      --font-sans: 'Pretendard', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top App Bar */
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 17px;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+    }
+
+    .brand-badge {
+      background: var(--meta-blue-light);
+      color: var(--meta-blue);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .slide-indicator {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .keyboard-hint {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .key-cap {
+      background: white;
+      border: 1px solid var(--border-subtle);
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    /* Deck Container */
+    .deck-viewport {
+      width: 100%;
+      max-width: 1200px;
+      padding: 88px 24px 96px 24px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+    }
+
+    .slide-card {
+      width: 100%;
+      min-height: 640px;
+      background: var(--bg-card);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-card);
+      padding: 52px 56px;
+      display: none;
+      flex-direction: column;
+      position: relative;
+      animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .slide-card.active {
+      display: flex;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.995);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    /* Slide Header */
+    .slide-header {
+      margin-bottom: 32px;
+    }
+
+    .slide-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--meta-blue);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .slide-title {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      color: var(--text-primary);
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+
+    .slide-subtitle {
+      font-size: 17px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* Content Layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      flex: 1;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      flex: 1;
+    }
+
+    .feature-card {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .feature-card:hover {
+      border-color: var(--meta-blue-border);
+      background: white;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 16px;
+      background: white;
+      border: 1px solid var(--border-subtle);
+      color: var(--meta-blue);
+    }
+
+    .feature-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ELI5 Callout */
+    .eli5-callout {
+      background: var(--meta-blue-light);
+      border: 1px solid var(--meta-blue-border);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .eli5-callout i {
+      font-size: 24px;
+      color: var(--meta-blue);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .eli5-callout-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--meta-blue);
+      margin-bottom: 4px;
+    }
+
+    .eli5-callout-text {
+      font-size: 14px;
+      color: #1A4476;
+      line-height: 1.5;
+    }
+
+    /* Code Snippet Box */
+    .code-box {
+      background: #1E1E2E;
+      color: #CDD6F4;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      border: 1px solid #313244;
+    }
+
+    .code-header {
+      background: #181825;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #313244;
+      font-size: 12px;
+      color: #A6ADC8;
+    }
+
+    .code-content {
+      padding: 16px;
+      overflow-x: auto;
+      flex: 1;
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: #CDD6F4;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s ease;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Status Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
+    .badge-safe {
+      background: var(--safe-green-light);
+      color: var(--safe-green);
+    }
+
+    .badge-caution {
+      background: var(--caution-orange-light);
+      color: var(--caution-orange);
+    }
+
+    .badge-danger {
+      background: var(--danger-red-light);
+      color: var(--danger-red);
+    }
+
+    /* Bottom Controller */
+    .bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      z-index: 100;
+    }
+
+    .progress-track {
+      flex: 1;
+      max-width: 460px;
+      height: 6px;
+      background: var(--border-subtle);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 0 24px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--meta-blue);
+      border-radius: 3px;
+      width: 11%;
+      transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .nav-btn-group {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 42px;
+      padding: 0 18px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+    }
+
+    .btn-secondary {
+      background: var(--bg-subtle);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
+
+    .btn-secondary:hover {
+      background: var(--border-subtle);
+    }
+
+    .btn-primary {
+      background: var(--meta-blue);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--meta-blue-hover);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* Flow Chart visual */
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 16px;
+      background: white;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .flow-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      width: 140px;
+    }
+
+    .flow-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--meta-blue-light);
+      color: var(--meta-blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0, 100, 224, 0.15);
+    }
+
+    .flow-node.active .flow-icon {
+      background: var(--meta-blue);
+      color: white;
+      transform: scale(1.08);
+      box-shadow: 0 4px 16px rgba(0, 100, 224, 0.35);
+    }
+
+    .flow-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .flow-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .flow-arrow {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 0 10px;
+    }
+
+    .flow-arrow-line {
+      width: 100%;
+      height: 2px;
+      background: var(--border-hover);
+      position: relative;
+      margin-top: 6px;
+    }
+
+    .flow-arrow-line::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: -4px;
+      width: 0;
+      height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 7px solid var(--border-hover);
+    }
+
+    /* Table styling */
+    .simple-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .simple-table th, .simple-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .simple-table th {
+      background: var(--bg-subtle);
+      font-weight: 700;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .simple-table tr:hover td {
+      background: #FAFBFD;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="top-bar">
+    <div class="brand">
+      <i class="ph-bold ph-bank" style="color: var(--meta-blue); font-size: 22px;"></i>
+      <span>스마트 금융 보안 ATM</span>
+      <span class="brand-badge">ELI5 가이드</span>
+    </div>
+    <div class="slide-indicator">
+      <span id="currentSlideNum">1</span> / <span id="totalSlideNum">9</span>
+    </div>
+    <div class="keyboard-hint">
+      <span>이동:</span>
+      <span class="key-cap">←</span>
+      <span class="key-cap">→</span>
+      <span class="key-cap">Space</span>
+    </div>
+  </header>
+
+  <!-- Main Slide Viewport -->
+  <main class="deck-viewport">
+
+    <!-- SLIDE 1: 오리엔테이션 -->
+    <section class="slide-card active" data-slide="1">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-sparkle"></i>
+          <span>Welcome, Raspberry Pi 5 Developer!</span>
+        </div>
+        <h1 class="slide-title">환영합니다! 우리의 미션:<br>은행 계산원(ATM) 만들기</h1>
+        <p class="slide-subtitle">
+          코딩이나 라즈베리파이를 몰라도 괜찮아요! 5살 아이에게 설명하듯 친절하게 알려드릴게요.
+        </p>
+      </div>
+
+      <div class="eli5-callout">
+        <i class="ph-fill ph-lightbulb"></i>
+        <div>
+          <div class="eli5-callout-title">ELI5 핵심 비유: 우리는 지금 무엇을 만드는 중일까요?</div>
+          <div class="eli5-callout-text">
+            우리가 다룰 <strong>라즈베리파이 5</strong>는 은행 창구의 <strong>똑똑한 계산원</strong>이에요.<br>
+            손님이 가져온 QR 코드를 보고 본점(서버)에 <em>"이분 돈 뽑아가도 되나요?"</em>라고 정중하게 전화(REST API)를 건 뒤,<br>
+            본점에서 허락하면 돈을 주고, 위험하다고 하면 딱 막는 역할을 맡습니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <div class="icon-box">
+            <i class="ph-bold ph-prohibit"></i>
+          </div>
+          <div class="feature-title">1단계에서는 안 하는 것</div>
+          <div class="feature-desc">
+            복잡한 모터 연결선, 납땜, 회로도, 어려운 DB SQL 쿼리는 <strong>지금 전혀 몰라도 됩니다!</strong>
+          </div>
+        </div>
+
+        <div class="feature-card" style="border-color: var(--meta-blue-border); background: white;">
+          <div class="icon-box" style="background: var(--meta-blue-light); color: var(--meta-blue);">
+            <i class="ph-bold ph-target"></i>
+          </div>
+          <div class="feature-title">오늘의 확실한 목표 (Aha!)</div>
+          <div class="feature-desc">
+            라즈베리파이에서 파이썬 코드로 백엔드에 <strong>노크(통신)</strong>해서 허락/차단 메시지를 <code>print()</code>로 확인하는 것!
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-box">
+            <i class="ph-bold ph-terminal-window"></i>
+          </div>
+          <div class="feature-title">하드웨어는 나중에!</div>
+          <div class="feature-desc">
+            모터가 없어도 모니터 화면에 <strong>"[ATM] 찰칵! 출금구 열림"</strong>이 뜨면 1차 성공입니다.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 2: 전체 시스템 그림판 -->
+    <section class="slide-card" data-slide="2">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-tree-structure"></i>
+          <span>System Mental Model</span>
+        </div>
+        <h2 class="slide-title">전체 그림 한눈에 보기</h2>
+        <p class="slide-subtitle">
+          스마트폰 앱, 백엔드 본점, 콜센터와 우리 라즈베리파이가 어떻게 대화할까요?
+        </p>
+      </div>
+
+      <!-- Flowchart -->
+      <div class="flow-diagram">
+        <div class="flow-node">
+          <div class="flow-icon"><i class="ph-bold ph-device-mobile"></i></div>
+          <div class="flow-title">1. 노약자 스마트폰</div>
+          <div class="flow-sub">의심 문자 분석 후<br>QR 생성 (Next.js)</div>
+        </div>
+        <div class="flow-arrow">
+          <span>QR 비추기</span>
+          <div class="flow-arrow-line"></div>
+        </div>
+        <div class="flow-node active">
+          <div class="flow-icon"><i class="ph-bold ph-cpu"></i></div>
+          <div class="flow-title">2. 라즈베리파이 (나!)</div>
+          <div class="flow-sub">QR 읽고 본점에 확인<br>출금 허용 / 차단 판단</div>
+        </div>
+        <div class="flow-arrow">
+          <span>REST API (JSON)</span>
+          <div class="flow-arrow-line"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-icon"><i class="ph-bold ph-database"></i></div>
+          <div class="flow-title">3. 백엔드 본점</div>
+          <div class="flow-sub">위험 판정 & 세션 관리<br>(FastAPI + DB)</div>
+        </div>
+        <div class="flow-arrow">
+          <span>위험 시 연결</span>
+          <div class="flow-arrow-line"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-icon"><i class="ph-bold ph-headset"></i></div>
+          <div class="flow-title">4. 콜센터 상담원</div>
+          <div class="flow-sub">피싱 확인 후<br>최종 해제/유지 결정</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="feature-title" style="display: flex; align-items: center; gap: 8px;">
+            <i class="ph-bold ph-hand-pointing" style="color: var(--meta-blue);"></i>
+            <span>라즈베리파이의 특권: "직접 판단한다!"</span>
+          </div>
+          <div class="feature-desc">
+            일반 사물인터넷 기기와 달리, 우리 ATM은 백엔드의 명령을 수동적으로 기다리지 않아요.<br>
+            QR을 찍는 순간 <strong>라즈베리파이가 먼저 백엔드에 물어보고 직접 출금을 막을지 열지 결정</strong>합니다.
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-title" style="display: flex; align-items: center; gap: 8px;">
+            <i class="ph-bold ph-shield-check" style="color: var(--safe-green);"></i>
+            <span>사람이 최종 확인하는 안전 원칙</span>
+          </div>
+          <div class="feature-desc">
+            위험(DANGER)으로 출금이 막히면 컴퓨터가 스스로 풀지 못해요.<br>
+            반드시 <strong>콜센터 상담원(사람)</strong>이 통화 후 정상 거래임을 확인해 줘야만 풀립니다!
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 3: 직원 신분증(API KEY)과 주소 -->
+    <section class="slide-card" data-slide="3">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-identification-badge"></i>
+          <span>Step 1: Configuration</span>
+        </div>
+        <h2 class="slide-title">첫 번째 관문: 직원 신분증과 본점 주소</h2>
+        <p class="slide-subtitle">
+          아무나 본점 컴퓨터에 들어오면 안 되겠죠? 라즈베리파이에게 "직원 목걸이"를 걸어줍니다.
+        </p>
+      </div>
+
+      <div class="eli5-callout">
+        <i class="ph-fill ph-info"></i>
+        <div>
+          <div class="eli5-callout-title">ELI5 비유: .env 파일은 계산원의 가방이에요!</div>
+          <div class="eli5-callout-text">
+            <code>.env</code> 파일에는 본점 전화번호(<code>BACKEND_URL</code>)와 나를 증명하는 비밀 암호 목걸이(<code>DEVICE_API_KEY</code>) 딱 2개가 들어있어요.
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="code-box">
+          <div class="code-header">
+            <span>pi/.env 설정 예시</span>
+            <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          </div>
+          <pre class="code-content"><code># 본점(백엔드) 주소
+# 같은 노트북 안에서 테스트할 때는 localhost
+BACKEND_URL=http://localhost:8000
+
+# 라즈베리파이에서 다른 PC 백엔드로 보낼 때 (예시 IP)
+# BACKEND_URL=http://192.168.0.15:8000
+
+# 계산원 직원 신분증 (헤더에 들어갈 API KEY)
+DEVICE_API_KEY=dev-device-key-change-in-production
+
+# 지금은 하드웨어가 없으므로 mock 모드로 실행
+DEVICE_MODE=mock</code></pre>
+        </div>
+
+        <div class="feature-card" style="justify-content: center;">
+          <h3 class="feature-title" style="margin-bottom: 16px;">꼭 지켜야 할 약속 3가지</h3>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 14px; color: var(--text-secondary);">
+            <li style="display: flex; gap: 10px;">
+              <i class="ph-fill ph-check-circle" style="color: var(--meta-blue); font-size: 18px; flex-shrink: 0;"></i>
+              <span><strong>백엔드 친구와 상의하기</strong>: 백엔드 친구에게 <em>"백엔드 켜진 PC의 IP 주소가 뭐야?"</em>라고 물어보고 <code>BACKEND_URL</code>에 적기.</span>
+            </li>
+            <li style="display: flex; gap: 10px;">
+              <i class="ph-fill ph-check-circle" style="color: var(--meta-blue); font-size: 18px; flex-shrink: 0;"></i>
+              <span><strong>신분증 키 일치시키기</strong>: 백엔드의 <code>DEVICE_API_KEY</code>와 파이의 키가 한 글자도 틀리지 않아야 본점에서 문을 열어줍니다 (401 에러 방지).</span>
+            </li>
+            <li style="display: flex; gap: 10px;">
+              <i class="ph-fill ph-check-circle" style="color: var(--meta-blue); font-size: 18px; flex-shrink: 0;"></i>
+              <span><strong>깃허브에 올리지 않기</strong>: <code>.env</code> 파일은 비밀번호라 깃허브에 안 올라가도록 <code>.gitignore</code>에 적혀 있으니 안심하세요.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 4: REST API 노크하기 -->
+    <section class="slide-card" data-slide="4">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-paper-plane-tilt"></i>
+          <span>Step 2: Communication</span>
+        </div>
+        <h2 class="slide-title">본점에 노크하기 (REST API란?)</h2>
+        <p class="slide-subtitle">
+          컴퓨터끼리 편지를 주고받는 표준 양식이 바로 REST API (JSON)입니다.
+        </p>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="icon-box"><i class="ph-bold ph-chat-centered-text"></i></div>
+          <div class="feature-title">우리가 보내는 쪽지 (Request)</div>
+          <p class="feature-desc" style="margin-bottom: 12px;">
+            파이썬의 <code>requests</code>라는 심부름꾼 라이브러리를 써서 본점에 물어봅니다.
+          </p>
+          <div style="background: white; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px;">
+            <span style="color: var(--meta-blue); font-weight: bold;">GET</span> /api/v1/atm/verify/VP-000003<br>
+            <span style="color: var(--text-tertiary);">헤더:</span> X-Device-Api-Key: dev-device-key...
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="icon-box"><i class="ph-bold ph-envelope-open"></i></div>
+          <div class="feature-title">본점이 주는 답장 (JSON Response)</div>
+          <p class="feature-desc" style="margin-bottom: 12px;">
+            본점은 항상 깔끔하게 이름표가 붙은 <strong>JSON 형식</strong>으로 답장을 줍니다.
+          </p>
+          <div style="background: white; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px;">
+            {<br>
+            &nbsp;&nbsp;"data": {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;"risk_level": "<span style="color: var(--danger-red); font-weight: bold;">DANGER</span>",<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;"action": "<span style="color: var(--danger-red); font-weight: bold;">BLOCK</span>",<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;"summary": "검찰 사칭 의심"<br>
+            &nbsp;&nbsp;}<br>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="eli5-callout" style="margin-top: 24px; margin-bottom: 0;">
+        <i class="ph-fill ph-lightbulb"></i>
+        <div>
+          <div class="eli5-callout-title">이미 완성되어 있는 치트키: `backend_client.py`</div>
+          <div class="eli5-callout-text">
+            복잡하게 일일이 코드를 짤 필요 없어요! 우리 프로젝트의 <code>pi/backend_client.py</code> 파일에<br>
+            <code>client.verify_session("VP-000003")</code> 딱 한 줄만 부르면 알아서 본점에 다녀오는 착한 함수가 이미 준비되어 있습니다!
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 5: QR 코드 속 보물찾기 -->
+    <section class="slide-card" data-slide="5">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-qr-code"></i>
+          <span>Step 3: QR Code Parsing</span>
+        </div>
+        <h2 class="slide-title">QR 코드에서 비밀번호 찾기</h2>
+        <p class="slide-subtitle">
+          QR 코드는 사진이 아니라 글자 덩어리입니다. 카메라가 읽은 글자에서 필요한 번호만 쏙 꺼냅니다.
+        </p>
+      </div>
+
+      <div class="eli5-callout">
+        <i class="ph-fill ph-shield-warning"></i>
+        <div>
+          <div class="eli5-callout-title">왜 QR에 개인정보나 사기 문자 내용을 통째로 넣지 않을까요?</div>
+          <div class="eli5-callout-text">
+            누군가 QR을 훔쳐보거나 위조할 수 있기 때문이에요! QR에는 오직 <strong>접수 번호표(`session_id`)</strong> 하나만 적어둡니다.<br>
+            진짜 위험한지 아닌지는 우리 ATM이 직접 본점에 물어봐야만 알 수 있습니다 (보안 원칙).
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">QR에서 나올 수 있는 3가지 모양</h3>
+          <table class="simple-table">
+            <thead>
+              <tr>
+                <th>형태</th>
+                <th>QR 내용 예시</th>
+                <th>설명</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>표준 (기본)</strong></td>
+                <td><code>{"session_id": "VP-000003"}</code></td>
+                <td>스마트폰 앱이 화면에 띄우는 정상 QR</td>
+              </tr>
+              <tr>
+                <td><strong>오프라인 백업</strong></td>
+                <td><code>{"session_id":"...", "risk_level":"DANGER"}</code></td>
+                <td>인터넷이 끊겼을 때만 비상용으로 사용</td>
+              </tr>
+              <tr>
+                <td><strong>단순 문자열</strong></td>
+                <td><code>VP-000003</code></td>
+                <td>개발자가 키보드로 테스트할 때 쓰는 형태</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="code-box">
+          <div class="code-header">
+            <span>pi/atm_controller.py 파싱 마법 함수</span>
+            <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          </div>
+          <pre class="code-content"><code># parse_qr_payload() 함수를 쓰면 끝!
+from atm_controller import parse_qr_payload
+
+# 1. QR에서 읽은 글자를 넣는다
+raw_qr = '{"session_id": "VP-000003"}'
+payload = parse_qr_payload(raw_qr)
+
+# 2. 접수 번호만 쏙 꺼낸다
+print(payload.session_id)
+# 출력 결과: VP-000003  (성공!)</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 6: 핵심 실습 print()로 반응하기 -->
+    <section class="slide-card" data-slide="6">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-play-circle"></i>
+          <span>Step 4: Hands-on Practice</span>
+        </div>
+        <h2 class="slide-title">핵심 실습: 본점에 묻고 print()로 반응하기</h2>
+        <p class="slide-subtitle">
+          하드웨어 연결 없이도 백엔드와 완벽하게 짝을 맞추는 10줄의 마법 코드입니다!
+        </p>
+      </div>
+
+      <div class="grid-2">
+        <div class="code-box">
+          <div class="code-header">
+            <span>test_atm_step1.py (직접 실행해보기)</span>
+            <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          </div>
+          <pre class="code-content"><code>from backend_client import BackendClient
+
+client = BackendClient()
+
+# 1. QR에서 읽은 세션 번호로 본점에 물어보기
+session_id = "VP-000003"
+print(f"[*] 본점에 {session_id} 확인 요청 중...")
+
+result = client.verify_session(session_id)
+action = result.get("action")  # ALLOW 또는 BLOCK
+
+# 2. 결과에 따라 모터 대신 print()로 동작시키기!
+if action == "ALLOW":
+    print("====================================")
+    print(" [ATM] 안전한 거래입니다.")
+    print(" [모터 대신 print] 찰칵! 현금 배출구가 열렸습니다!")
+    print("====================================")
+elif action == "BLOCK":
+    print("====================================")
+    print(" [ATM 경고] 보이스피싱 의심 거래 감지!")
+    print(" [모터 대신 print] 삐삐삐! 현금 배출을 강력 차단합니다!")
+    print(f" 의심 사유: {result.get('summary')}")
+    print("====================================")</code></pre>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="feature-card" style="border-left: 4px solid var(--safe-green);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span class="badge badge-safe">SAFE 판정일 때</span>
+              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--safe-green);">action: "ALLOW"</span>
+            </div>
+            <div class="feature-desc">
+              고객이 안심하고 돈을 뽑을 수 있도록 서보모터(배출구)를 여는 신호를 보냅니다. (지금은 <code>print()</code>로 확인!)
+            </div>
+          </div>
+
+          <div class="feature-card" style="border-left: 4px solid var(--caution-orange);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span class="badge badge-caution">CAUTION 판정일 때</span>
+              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--caution-orange);">action: "VERIFY"</span>
+            </div>
+            <div class="feature-desc">
+              조금이라도 의심되면 일단 배출을 멈추고 추가 확인 절차로 연결합니다.
+            </div>
+          </div>
+
+          <div class="feature-card" style="border-left: 4px solid var(--danger-red);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span class="badge badge-danger">DANGER 판정일 때</span>
+              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--danger-red);">action: "BLOCK"</span>
+            </div>
+            <div class="feature-desc">
+              절대로 돈이 나오지 않도록 차단하고, 화면을 콜센터 연결 상태(<code>CALL_CENTER</code>)로 바꿉니다!
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 7: 상담원 확인 기다리기 (폴링) -->
+    <section class="slide-card" data-slide="7">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-arrows-clockwise"></i>
+          <span>Step 5: Polling Cycle</span>
+        </div>
+        <h2 class="slide-title">상담원 확인 기다리기 (폴링이란?)</h2>
+        <p class="slide-subtitle">
+          출금이 막혔을 때, 라즈베리파이는 상담원이 풀어줬는지 어떻게 알 수 있을까요?
+        </p>
+      </div>
+
+      <div class="eli5-callout">
+        <i class="ph-fill ph-hourglass-high"></i>
+        <div>
+          <div class="eli5-callout-title">ELI5 비유: "엄마, 밥 다 됐어?" 계속 물어보는 아이</div>
+          <div class="eli5-callout-text">
+            <strong>폴링(Polling)</strong>이란 주기적으로 <em>"결정하셨나요?"</em>하고 노크하는 기술이에요.<br>
+            ATM이 2~3초마다 본점에 <code>GET /api/v1/atm/session-status/{session_id}</code>를 물어보다가,<br>
+            상담원이 <code>RELEASED(해제)</code> 도장을 찍어주면 그 즉시 차단을 풀고 돈을 내보냅니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="code-box">
+          <div class="code-header">
+            <span>폴링 시연 루프 코드</span>
+            <button class="copy-btn" onclick="copyCode(this)">복사</button>
+          </div>
+          <pre class="code-content"><code>import time
+from backend_client import BackendClient
+
+client = BackendClient()
+session_id = "VP-000003"
+
+print("[*] 콜센터 상담원의 판단을 기다리는 중...")
+
+while True:
+    status = client.read_session_status(session_id)
+    resolution = status.get("callcenter_resolution")
+    
+    if resolution == "RELEASED":
+        print(" [상담원] 정상 거래로 확인되어 제한을 해제합니다!")
+        print(" [모터 대신 print] 찰칵! 출금 가능 상태로 전환!")
+        break
+    elif resolution == "MAINTAINED":
+        print(" [상담원] 보이스피싱 확정! 출금을 영구 차단합니다.")
+        break
+    else:
+        print(" ...아직 상담원 확인 중입니다 (2초 후 재확인)...")
+        time.sleep(2)</code></pre>
+        </div>
+
+        <div class="feature-card" style="justify-content: center;">
+          <h3 class="feature-title" style="margin-bottom: 16px;">콜센터 연동 테스트 꿀팁</h3>
+          <div style="font-size: 14px; line-height: 1.7; color: var(--text-secondary);">
+            <p style="margin-bottom: 12px;">
+              <strong>1. 콜센터 담당 학생과 짝꿍 플레이:</strong><br>
+              내가 위 파이썬 스크립트를 켜두면 콘솔에 <em>"...확인 중..."</em>이 계속 뜹니다.
+            </p>
+            <p style="margin-bottom: 12px;">
+              <strong>2. 웹 화면에서 [해제] 버튼 클릭:</strong><br>
+              콜센터 담당 친구가 웹 브라우저 (<code>/callcenter</code>)에서 해당 세션의 <strong>[정상 거래 확인 (제한 해제)]</strong> 버튼을 딸깍 누릅니다.
+            </p>
+            <p>
+              <strong>3. 내 터미널에 풀리는 기적 목격:</strong><br>
+              그 순간 내 라즈베리파이 터미널에 <strong>"찰칵! 출금 가능!"</strong>이 찍히면 둘의 통신이 100% 완벽하게 연결된 것입니다!
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 8: 에러 사전 (디버깅) -->
+    <section class="slide-card" data-slide="8">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-wrench"></i>
+          <span>Step 6: Troubleshooting</span>
+        </div>
+        <h2 class="slide-title">"앗 에러가 났어요!" 당황하지 마세요</h2>
+        <p class="slide-subtitle">
+          개발 중에 만나는 빨간 글씨는 고장 난 게 아니라 컴퓨터가 보내는 친절한 신호입니다.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <div class="feature-card" style="border-top: 4px solid var(--danger-red);">
+          <div class="icon-box" style="color: var(--danger-red);">
+            <i class="ph-bold ph-wifi-x"></i>
+          </div>
+          <div class="feature-title">Connection Refused</div>
+          <div style="font-size: 12px; color: var(--danger-red); font-weight: bold; margin-bottom: 8px;">연결할 수 없음</div>
+          <p class="feature-desc">
+            <strong>원인:</strong> 본점(백엔드 서버)이 아직 안 켜져 있거나, <code>BACKEND_URL</code>에 적힌 IP 주소가 틀렸어요.<br><br>
+            <strong>해결:</strong> 백엔드 담당 친구에게 <em>"FastAPI 서버 켜져 있어?"</em> 확인하고 IP 주소를 다시 적어주세요.
+          </p>
+        </div>
+
+        <div class="feature-card" style="border-top: 4px solid var(--caution-orange);">
+          <div class="icon-box" style="color: var(--caution-orange);">
+            <i class="ph-bold ph-key-return"></i>
+          </div>
+          <div class="feature-title">401 Unauthorized</div>
+          <div style="font-size: 12px; color: var(--caution-orange); font-weight: bold; margin-bottom: 8px;">신분증 불일치</div>
+          <p class="feature-desc">
+            <strong>원인:</strong> 라즈베리파이의 <code>DEVICE_API_KEY</code>와 백엔드의 키가 서로 달라요.<br><br>
+            <strong>해결:</strong> <code>.env</code> 파일 속 <code>DEVICE_API_KEY</code> 값을 백엔드 친구의 <code>.env</code>와 똑같이 복사해서 붙여넣으세요.
+          </p>
+        </div>
+
+        <div class="feature-card" style="border-top: 4px solid var(--meta-blue);">
+          <div class="icon-box" style="color: var(--meta-blue);">
+            <i class="ph-bold ph-file-dashed"></i>
+          </div>
+          <div class="feature-title">404 Not Found</div>
+          <div style="font-size: 12px; color: var(--meta-blue); font-weight: bold; margin-bottom: 8px;">세션을 찾을 수 없음</div>
+          <p class="feature-desc">
+            <strong>원인:</strong> QR에 적힌 <code>session_id</code>가 본점 DB에 등록되지 않은 번호예요.<br><br>
+            <strong>해결:</strong> 스마트폰 웹(<code>/messages</code>)에서 실제로 의심 문자 분석을 돌린 뒤 새로 발급된 QR 번호로 테스트하세요.
+          </p>
+        </div>
+      </div>
+
+      <div class="eli5-callout" style="margin-top: 24px; margin-bottom: 0;">
+        <i class="ph-fill ph-check-fat"></i>
+        <div>
+          <div class="eli5-callout-title">에러 해결 공식: "IP 확인 ➡️ 키 확인 ➡️ 세션 번호 확인"</div>
+          <div class="eli5-callout-text">
+            이 3가지만 체크하면 통신 에러의 99%는 5분 안에 해결됩니다!
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 9: 다음 여정 (하드웨어 연결 준비) -->
+    <section class="slide-card" data-slide="9">
+      <div class="slide-header">
+        <div class="slide-tag">
+          <i class="ph-bold ph-rocket-launch"></i>
+          <span>Next Steps</span>
+        </div>
+        <h2 class="slide-title">축하합니다! 이제 하드웨어를 맞이할 준비 완료</h2>
+        <p class="slide-subtitle">
+          REST API 통신과 판정 로직을 정복했으니, 이제 진짜 물리적 모터와 카메라를 연결할 차례입니다.
+        </p>
+      </div>
+
+      <div class="grid-2">
+        <div class="feature-card">
+          <div class="icon-box" style="background: var(--safe-green-light); color: var(--safe-green);">
+            <i class="ph-bold ph-check-square-offset"></i>
+          </div>
+          <div class="feature-title">우리가 완성한 기초 체력</div>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 12px; font-size: 14px; color: var(--text-secondary);">
+            <li style="display: flex; gap: 8px;">
+              <i class="ph-bold ph-check" style="color: var(--safe-green);"></i>
+              <span>라즈베리파이 ↔ 백엔드 REST API 통신 성공</span>
+            </li>
+            <li style="display: flex; gap: 8px;">
+              <i class="ph-bold ph-check" style="color: var(--safe-green);"></i>
+              <span>QR 번호(<code>session_id</code>)를 받아 위험도(ALLOW/BLOCK) 판별</span>
+            </li>
+            <li style="display: flex; gap: 8px;">
+              <i class="ph-bold ph-check" style="color: var(--safe-green);"></i>
+              <span>위험 시 콜센터 상태로 넘어가 폴링 대기 로직 완성</span>
+            </li>
+            <li style="display: flex; gap: 8px;">
+              <i class="ph-bold ph-check" style="color: var(--safe-green);"></i>
+              <span><code>print()</code>문으로 출금 허용/차단 디버깅 시각화 완료</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="feature-card" style="border-color: var(--meta-blue-border); background: white;">
+          <div class="icon-box" style="background: var(--meta-blue-light); color: var(--meta-blue);">
+            <i class="ph-bold ph-circuit-board"></i>
+          </div>
+          <div class="feature-title">다음 2차 작업: 실제 하드웨어 얹기</div>
+          <div style="font-size: 14px; line-height: 1.6; color: var(--text-secondary);">
+            <p style="margin-bottom: 10px;">
+              통신이 튼튼하게 돌아가므로, 이제 <code>print()</code> 자리에 <strong>진짜 모터 코드</strong> 한 줄만 넣으면 끝납니다!
+            </p>
+            <div style="background: var(--bg-subtle); border-radius: 8px; padding: 10px; font-family: var(--font-mono); font-size: 12px; margin-bottom: 12px;">
+              <span style="color: var(--text-tertiary);"># print("모터 열림") 자리에 들어갈 한 줄:</span><br>
+              <span style="color: var(--meta-blue); font-weight: bold;">servo_gate.min()</span>  <span style="color: var(--safe-green);"># 문 열림!</span>
+            </div>
+            <p>
+              GPIO 핀 연결 및 서보모터 제어 가이드는 다음 챕터에서 함께 진행해요! 멋진 개발자가 된 것을 환영합니다 🚀
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 32px;">
+        <button class="btn btn-primary" style="height: 48px; padding: 0 28px; font-size: 16px;" onclick="goToSlide(1)">
+          <i class="ph-bold ph-arrow-counter-clockwise"></i>
+          <span>처음부터 다시 보기</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Controller Bar -->
+  <footer class="bottom-bar">
+    <button id="prevBtn" class="btn btn-secondary" onclick="prevSlide()">
+      <i class="ph-bold ph-arrow-left"></i>
+      <span>이전</span>
+    </button>
+
+    <div class="progress-track">
+      <div id="progressBar" class="progress-bar"></div>
+    </div>
+
+    <div class="nav-btn-group">
+      <button id="nextBtn" class="btn btn-primary" onclick="nextSlide()">
+        <span>다음</span>
+        <i class="ph-bold ph-arrow-right"></i>
+      </button>
+    </div>
+  </footer>
+
+  <script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    let currentSlide = 1;
+    const totalSlides = 9;
+
+    const slides = document.querySelectorAll('.slide-card');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const currentSlideNum = document.getElementById('currentSlideNum');
+    const progressBar = document.getElementById('progressBar');
+
+    function updateDeck() {
+      slides.forEach((slide, idx) => {
+        const slideNum = idx + 1;
+        if (slideNum === currentSlide) {
+          slide.classList.add('active');
+        } else {
+          slide.classList.remove('active');
+        }
+      });
+
+      // Update indicators
+      currentSlideNum.textContent = currentSlide;
+      progressBar.style.width = `${(currentSlide / totalSlides) * 100}%`;
+
+      // Update button states
+      prevBtn.disabled = currentSlide === 1;
+      if (currentSlide === totalSlides) {
+        nextBtn.innerHTML = '<span>처음으로</span> <i class="ph-bold ph-arrow-counter-clockwise"></i>';
+      } else {
+        nextBtn.innerHTML = '<span>다음</span> <i class="ph-bold ph-arrow-right"></i>';
+      }
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides) {
+        currentSlide++;
+      } else {
+        currentSlide = 1;
+      }
+      updateDeck();
+    }
+
+    function prevSlide() {
+      if (currentSlide > 1) {
+        currentSlide--;
+        updateDeck();
+      }
+    }
+
+    function goToSlide(num) {
+      if (num >= 1 && num <= totalSlides) {
+        currentSlide = num;
+        updateDeck();
+      }
+    }
+
+    // Keyboard navigation
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        prevSlide();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        goToSlide(1);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        goToSlide(totalSlides);
+      }
+    });
+
+    // Code copy helper
+    function copyCode(btn) {
+      const codeBox = btn.closest('.code-box');
+      const code = codeBox.querySelector('code').innerText;
+      navigator.clipboard.writeText(code).then(() => {
+        const originalText = btn.innerText;
+        btn.innerText = '복사 완료!';
+        setTimeout(() => {
+          btn.innerText = originalText;
+        }, 1800);
+      });
+    }
+
+    // Init
+    updateDeck();
+  </script>
+</body>
+</html>

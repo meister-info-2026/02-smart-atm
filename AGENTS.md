@@ -14,7 +14,7 @@
   - Supabase(PostgreSQL) 전환은 `[미정]` — 하게 되면 `db-migration` 스킬 참고
 - 프론트엔드: Next.js(TypeScript) — 스마트폰/태블릿 **웹** 화면
   - PRD '최종 구현환경'은 Flutter 네이티브 앱이지만, 이 저장소는 하네스 고정 스택인
-    Next.js 웹으로 구현했다. 백엔드 API 계약(`docs/데이터-연동-규격.md`)은 그대로이므로
+    Next.js 웹으로 구현했다. 백엔드 API 계약(`docs/03_데이터-연동-규격.md`)은 그대로이므로
     Flutter로 갈아탈 때도 서버/ATM 쪽은 바꾸지 않아도 된다
   - 사용자용 / ATM 디스플레이용 / 콜센터용 라우트를 한 앱 안에서 분리한다
 - 하드웨어 제어: Python venv Mock(개발 전반부) → 라즈베리파이 5 + gpiozero(개발 후반부)
@@ -28,8 +28,8 @@
 > 기본 스타터 킷 예시("웹캠이 사람/사물을 감지 → 즉시 액추에이터 제어")와 달리, 이
 > 프로젝트는 **QR로 세션 식별자만 전달**하고 **라즈베리파이가 백엔드의 desired-state를
 > 기다리지 않고 QR을 읽는 즉시 스스로 판단**한다. 상세 설계는
-> `docs/데이터-연동-규격.md`,
-> `docs/스마트금융보안ATM-AGENTS-초안-및-보충가이드.md` 2부,
+> `docs/03_데이터-연동-규격.md`,
+> `docs/부록C_스마트금융보안ATM-AGENTS-초안-및-보충가이드.md` 2부,
 > `.agents/skills/qr-recognition-integration/SKILL.md`,
 > `.agents/skills/callcenter-session-integration/SKILL.md`를 참고한다.
 
@@ -77,7 +77,7 @@
   시연이 가능해야 한다 — `backend/analysis/`의 규칙 엔진은 백업 수단으로 계속 유지한다
 - 이 프로젝트는 기본 스킬 범위를 넘는 부분(QR 인식/생성, 콜센터 세션 상태)이 있다 —
   해당 작업을 요청할 때는 `qr-recognition-integration`이나
-  `callcenter-session-integration` 스킬, 또는 `docs/데이터-연동-규격.md`의 절 번호를
+  `callcenter-session-integration` 스킬, 또는 `docs/03_데이터-연동-규격.md`의 절 번호를
   함께 언급한다
 
 ## 폴더 구조
@@ -101,7 +101,7 @@
 └── scripts/            (demo_e2e.py — 통합 시연 자동 검증)
 ```
 각 폴더의 `.env.example`을 `.env`로 복사해 실제 값을 채운다 (`.env`는 커밋되지
-않는다 — `docs/스마트금융보안ATM-실행-가이드.md` 참고).
+않는다 — `docs/02_스마트금융보안ATM-실행-가이드.md` 참고).
 
 ## 팀 정보
 
