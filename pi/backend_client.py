@@ -22,6 +22,25 @@ class SessionNotFoundError(RuntimeError):
     """서버가 모르는 session_id — 잘못된 QR이다 (TC-04)."""
 
 
+class DeviceAuthError(RuntimeError):
+    """디바이스 키가 거부됐다 (401/403).
+
+    이건 장애가 아니라 **설정 오류**다. 서버는 멀쩡히 살아서 대답했고, 다만 이
+    ATM을 못 믿겠다고 한 것이다. 그러니 '오프라인'으로 취급해 QR이 스스로 말하는
+    위험 등급을 믿으면 안 된다 — 키 오타 하나로 위조 QR에 현금이 나가게 된다.
+    """
+
+
+def _raise_if_unauthorized(response: "requests.Response", path: str) -> None:
+    """401/403이면 설정 오류로 알린다 (장애와 섞이지 않게)."""
+    if response.status_code in (401, 403):
+        raise DeviceAuthError(
+            f"서버가 디바이스 키를 거부했습니다 (HTTP {response.status_code}, {path}). "
+            "pi/.env의 DEVICE_API_KEY와 backend/.env의 DEVICE_API_KEY가 같은 값인지 "
+            "확인하고, 고친 뒤에는 ATM 데몬을 껐다 다시 켜세요."
+        )
+
+
 class BackendClient:
     """ATM이 쓰는 백엔드 API 클라이언트."""
 
@@ -39,6 +58,7 @@ class BackendClient:
             raise BackendUnavailableError(f"백엔드에 연결하지 못했습니다: {exc}") from exc
         if response.status_code == 404:
             raise SessionNotFoundError(f"서버에 없는 세션입니다: {path}")
+        _raise_if_unauthorized(response, path)
         response.raise_for_status()
         return response.json()["data"]
 
@@ -54,6 +74,7 @@ class BackendClient:
             raise BackendUnavailableError(f"백엔드에 연결하지 못했습니다: {exc}") from exc
         if response.status_code == 404:
             raise SessionNotFoundError(f"서버에 없는 세션입니다: {path}")
+        _raise_if_unauthorized(response, path)
         response.raise_for_status()
         return response.json()["data"]
 

@@ -17,7 +17,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from backend_client import BackendClient, BackendUnavailableError, SessionNotFoundError
+from backend_client import (
+    BackendClient,
+    BackendUnavailableError,
+    DeviceAuthError,
+    SessionNotFoundError,
+)
 
 logger = logging.getLogger("atm_controller")
 
@@ -66,6 +71,11 @@ GUIDANCE: dict[str, str] = {
 # 상담원이 보이스피싱으로 확정한 뒤에는 '기다려 주세요'라고 하면 안 된다 —
 # 결론이 난 상태이므로 무엇을 해야 하는지 알려 준다 (FR-10 노약자 안내 원칙)
 GUIDANCE_MAINTAINED = "보이스피싱으로 확인되어 현금 출금을 계속 제한합니다. 은행 창구로 가 주세요"
+
+# 설정이 잘못돼 서버 검증을 못 하는 상태. 어르신께는 기술적인 원인 대신 무엇을 해야
+# 하는지만 알려 주고, 진짜 원인은 로그에 남긴다 (관리자가 볼 곳은 로그다).
+ERROR_DEVICE_AUTH = "지금은 이 ATM을 사용할 수 없습니다. 은행 직원에게 알려 주세요"
+ERROR_VERIFY_FAILED = "위험 정보를 확인하지 못했습니다. 처음부터 다시 진행해 주세요"
 
 
 @dataclass
@@ -203,7 +213,12 @@ class AtmController:
         return self.snapshot()
 
     async def _verify(self, payload: QrPayload) -> dict[str, Any] | None:
-        """서버 검증을 먼저 시도하고, 네트워크가 끊겼을 때만 로컬 판단으로 넘어간다."""
+        """서버 검증을 먼저 시도한다.
+
+        로컬 판단으로 넘어가는 경우는 **서버에 닿지 못했을 때 하나뿐이다**(PRD 11.3).
+        서버가 대답을 했는데 그 대답이 마음에 안 든다고 QR을 믿기 시작하면, QR이
+        스스로 적어 온 위험 등급이 서버 판정을 이기게 된다 — 그건 검증이 아니다.
+        """
         if self._backend is None:
             return self._local_verify(payload)
 
@@ -213,10 +228,23 @@ class AtmController:
             # 서버가 모르는 QR — 위조/오래된 QR이므로 거래에 쓰지 않는다
             self.last_error = "등록되지 않은 QR입니다. 처음부터 다시 진행해 주세요."
             return None
-        except (BackendUnavailableError, Exception) as exc:  # noqa: BLE001
-            logger.warning("서버 검증 실패, 로컬 판단으로 전환합니다: %s", exc)
+        except DeviceAuthError as exc:
+            # 서버는 살아 있고 이 ATM을 거부한 것이다. 장애가 아니라 설정 오류이므로
+            # 오프라인으로 넘어가지 않고 멈춘다 (키 오타 하나로 현금이 나가면 안 된다).
+            logger.error("디바이스 인증 실패 — 설정을 고쳐야 합니다: %s", exc)
+            self.last_error = ERROR_DEVICE_AUTH
+            return None
+        except BackendUnavailableError as exc:
+            # 여기가 유일한 백업 경로다 — 서버에 정말 닿지 못했을 때
+            logger.warning("서버에 연결하지 못해 로컬 판단으로 전환합니다: %s", exc)
             self.offline = True
             return self._local_verify(payload)
+        except Exception as exc:  # noqa: BLE001
+            # 원인을 모르는 실패. 서버에 닿았는지조차 확신할 수 없으니 QR을 믿지 않는다.
+            # (ATM 전체가 죽지는 않게 잡되, 거래는 열지 않는다)
+            logger.exception("서버 검증 중 예상하지 못한 오류: %s", exc)
+            self.last_error = ERROR_VERIFY_FAILED
+            return None
 
         self.offline = False
         return verified
@@ -268,6 +296,11 @@ class AtmController:
             return self.snapshot()
         try:
             status = await asyncio.to_thread(self._backend.read_session_status, self.session_id)
+        except DeviceAuthError as exc:
+            # 폴링도 마찬가지다. '오프라인'이라고 표시하면 멀쩡한 서버를 뒤지게 된다.
+            logger.error("디바이스 인증 실패 — 설정을 고쳐야 합니다: %s", exc)
+            self.last_error = ERROR_DEVICE_AUTH
+            return self.snapshot()  # 제한은 그대로 유지된다
         except Exception as exc:  # noqa: BLE001
             logger.warning("세션 상태 폴링 실패: %s", exc)
             self.offline = True

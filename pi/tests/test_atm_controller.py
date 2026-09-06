@@ -223,3 +223,90 @@ def test_new_qr_clears_previous_callcenter_result(
     asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
     assert controller.callcenter_resolution is None
     assert controller.snapshot()["state"] == STATE_WITHDRAW_ENABLED
+
+
+# ── 디바이스 키 설정 오류 (장애로 위장되면 안 된다) ─────────────────────────
+def test_auth_failure_never_falls_back_to_qr_claim(
+    controller: AtmController, backend: FakeBackend, provider: MockDeviceProvider
+) -> None:
+    """키가 틀렸을 때 QR이 스스로 적어 온 위험 등급을 믿으면 안 된다.
+
+    이게 이 프로젝트에서 가장 위험한 조합이다 — `.env`의 DEVICE_API_KEY 오타 하나로
+    ATM이 '오프라인 모드'가 되어, 위조 QR이 SAFE라고 주장하면 서버가 DANGER로
+    판정한 세션에서도 현금이 나가 버린다.
+    """
+    backend.auth_rejected = True
+    forged = f'{{"session_id": "{DANGER_SESSION}", "risk_level": "SAFE"}}'
+
+    snapshot = asyncio.run(controller.handle_qr(forged))
+
+    assert snapshot["state"] == STATE_READY, "거래를 열어 주면 안 된다"
+    assert snapshot["session_id"] is None
+    assert snapshot["offline"] is False, "서버는 대답했다 — 오프라인이라고 하면 안 된다"
+    assert snapshot["last_error"]
+
+    asyncio.run(controller.request_withdraw(500000))
+    assert provider.dispense_count == 0
+
+
+def test_auth_failure_shows_actionable_message_not_jargon(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """화면에는 원인 대신 무엇을 해야 하는지가 떠야 한다 (FR-10 노약자 안내)."""
+    backend.auth_rejected = True
+    snapshot = asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+
+    message = snapshot["last_error"] or ""
+    assert "은행 직원" in message
+    assert "DEVICE_API_KEY" not in message, "키 이름을 어르신 화면에 띄우지 않는다"
+
+
+def test_auth_failure_during_polling_keeps_block_and_is_not_offline(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """폴링이 401을 받아도 제한은 유지하고, '오프라인'이라고 표시하지 않는다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert controller.state == STATE_WITHDRAW_BLOCKED
+
+    backend.auth_rejected = True
+    snapshot = asyncio.run(controller.refresh_from_backend())
+
+    assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
+    assert snapshot["offline"] is False
+    assert snapshot["last_error"]
+
+
+def test_unexpected_backend_error_does_not_open_withdrawal(
+    controller: AtmController, backend: FakeBackend, provider: MockDeviceProvider
+) -> None:
+    """원인을 모르는 오류에서도 QR 주장을 믿지 않는다 (서버에 닿았는지 모른다)."""
+
+    def boom(_session_id: str) -> dict:
+        raise ValueError("응답을 해석하지 못했습니다")
+
+    backend.verify_session = boom  # type: ignore[method-assign]
+    snapshot = asyncio.run(controller.handle_qr(
+        f'{{"session_id": "{DANGER_SESSION}", "risk_level": "SAFE"}}'
+    ))
+
+    assert snapshot["state"] == STATE_READY
+    asyncio.run(controller.request_withdraw(500000))
+    assert provider.dispense_count == 0
+
+
+def test_real_outage_still_uses_documented_backup_path(
+    controller: AtmController, backend: FakeBackend, provider: MockDeviceProvider
+) -> None:
+    """서버에 정말 닿지 못하는 경우의 백업 경로는 그대로 살아 있어야 한다.
+
+    docs/02 '백업 시연': 백엔드가 죽었을 때 risk_level이 든 QR로 차단까지는 시연한다.
+    """
+    backend.unavailable = True
+    snapshot = asyncio.run(controller.handle_qr(
+        f'{{"session_id": "{DANGER_SESSION}", "risk_level": "DANGER"}}'
+    ))
+
+    assert snapshot["offline"] is True
+    assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
+    asyncio.run(controller.request_withdraw(500000))
+    assert provider.dispense_count == 0

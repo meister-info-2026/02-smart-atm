@@ -1,5 +1,5 @@
 """pi 테스트용 공용 더블 — 백엔드 응답을 흉내 낸다."""
-from backend_client import BackendUnavailableError, SessionNotFoundError
+from backend_client import BackendUnavailableError, DeviceAuthError, SessionNotFoundError
 
 SAFE_SESSION = "VP-000001"
 DANGER_SESSION = "VP-000002"
@@ -29,10 +29,17 @@ class FakeBackend:
         self.scans: list[tuple[str, str]] = []
         self.withdraw_reports: list[tuple[str, bool]] = []
         self.unavailable = False
+        # 키가 틀렸을 때 — 서버는 살아 있고 401로 대답한다 (장애와 다르다)
+        self.auth_rejected = False
 
-    def verify_session(self, session_id: str) -> dict:
+    def _guard(self) -> None:
+        if self.auth_rejected:
+            raise DeviceAuthError("서버가 디바이스 키를 거부했습니다 (HTTP 401)")
         if self.unavailable:
             raise BackendUnavailableError("네트워크 끊김")
+
+    def verify_session(self, session_id: str) -> dict:
+        self._guard()
         if session_id not in self.sessions:
             raise SessionNotFoundError(session_id)
         return self.sessions[session_id]
@@ -42,6 +49,7 @@ class FakeBackend:
         return {}
 
     def read_session_status(self, session_id: str) -> dict:
+        self._guard()
         return {
             "session_id": session_id,
             "action": self.status_action.get(session_id, "BLOCK"),
