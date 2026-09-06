@@ -147,7 +147,10 @@ pytest
 - `pi/tests/test_qr_end_to_end.py` — 실제 QR 이미지를 만들어 다시 읽는 검증
 
 ### 5-2. 통합 시연 검증 (백엔드 + ATM 데몬을 띄운 상태에서)
+QR 이미지를 실제로 만들어 다시 읽으므로 `qrcode`가 필요하다 (없으면
+`pi/tests/test_qr_end_to_end.py`도 조용히 건너뛴다).
 ```bash
+pip install "qrcode[pil]"
 python scripts/demo_e2e.py
 ```
 정상 문자 → 출금 가능, 보이스피싱 문자 → 출금 차단 → 콜센터 해제까지 실제 HTTP로

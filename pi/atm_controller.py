@@ -51,6 +51,10 @@ CASH_DISPENSER_DEVICE_ID = "cash_dispenser_1"
 BUZZER_DEVICE_ID = "buzzer_1"
 DISPENSER_DISPENSING = "DISPENSING"
 
+# 콜센터 확인 결과 (PRD 8.3) — RELEASED는 서버가 action=ALLOW로 바꿔 주므로
+# 이 파일에서는 '제한 유지' 쪽만 직접 구분하면 된다
+RESOLUTION_MAINTAINED = "MAINTAINED"
+
 # 노약자용 큰 글씨 안내 문구 (FR-10) — 화면은 이 문구를 그대로 크게 띄운다
 GUIDANCE: dict[str, str] = {
     STATE_READY: "휴대폰 화면의 QR 코드를 카메라에 보여 주세요",
@@ -58,6 +62,10 @@ GUIDANCE: dict[str, str] = {
     STATE_WITHDRAW_BLOCKED: "보이스피싱 위험이 확인되어 현금 출금을 잠시 멈췄습니다",
     STATE_CALL_CENTER: "상담원이 확인 중입니다. 잠시만 기다려 주세요",
 }
+
+# 상담원이 보이스피싱으로 확정한 뒤에는 '기다려 주세요'라고 하면 안 된다 —
+# 결론이 난 상태이므로 무엇을 해야 하는지 알려 준다 (FR-10 노약자 안내 원칙)
+GUIDANCE_MAINTAINED = "보이스피싱으로 확인되어 현금 출금을 계속 제한합니다. 은행 창구로 가 주세요"
 
 
 @dataclass
@@ -119,10 +127,21 @@ class AtmController:
         self.risk_score: int | None = None
         self.reasons: list[str] = []
         self.summary: str = ""
+        self.callcenter_resolution: str | None = None
         self.last_error: str | None = None
         self.offline: bool = False
 
     # ── 조회 ────────────────────────────────────────────────────────────────
+    @property
+    def guidance(self) -> str:
+        """지금 화면에 크게 띄울 안내 문구."""
+        if (
+            self.state == STATE_WITHDRAW_BLOCKED
+            and self.callcenter_resolution == RESOLUTION_MAINTAINED
+        ):
+            return GUIDANCE_MAINTAINED
+        return GUIDANCE.get(self.state, "")
+
     def snapshot(self) -> dict[str, Any]:
         """7인치 터치 화면이 그대로 그릴 수 있는 현재 상태."""
         return {
@@ -132,8 +151,9 @@ class AtmController:
             "risk_score": self.risk_score,
             "reasons": self.reasons,
             "summary": self.summary,
-            "guidance": GUIDANCE.get(self.state, ""),
+            "guidance": self.guidance,
             "can_withdraw": self.state == STATE_WITHDRAW_ENABLED,
+            "callcenter_resolution": self.callcenter_resolution,
             "last_error": self.last_error,
             "offline": self.offline,
         }
@@ -146,6 +166,7 @@ class AtmController:
         self.risk_score = None
         self.reasons = []
         self.summary = ""
+        self.callcenter_resolution = None
         self.last_error = None
         self.offline = False
 
@@ -169,6 +190,7 @@ class AtmController:
         self.risk_score = verified.get("risk_score")
         self.reasons = list(verified.get("reasons") or [])
         self.summary = verified.get("summary") or ""
+        self.callcenter_resolution = None  # 새 세션이므로 앞 사람의 확인 결과를 지운다
         self.last_error = None
 
         action = verified.get("action") or RISK_TO_ACTION.get(self.risk_level or "", ACTION_BLOCK)
@@ -252,9 +274,14 @@ class AtmController:
             return self.snapshot()
 
         self.offline = False
+        self.callcenter_resolution = status.get("callcenter_resolution")
         action = status.get("action", ACTION_BLOCK)
         if action == ACTION_ALLOW:
             self.state = STATE_WITHDRAW_ENABLED
+        elif self.callcenter_resolution == RESOLUTION_MAINTAINED:
+            # 상담원이 보이스피싱으로 확정했다. 결론이 났는데 계속 '확인 중'을
+            # 띄워 두면 어르신은 끝없이 기다리게 된다 — 차단 상태로 되돌린다.
+            self.state = STATE_WITHDRAW_BLOCKED
         elif self.state == STATE_WITHDRAW_ENABLED:
             # 서버가 다시 막았다면 즉시 반영한다
             self.state = STATE_WITHDRAW_BLOCKED

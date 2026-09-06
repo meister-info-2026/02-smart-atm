@@ -129,7 +129,8 @@ export default function AtmScreen() {
               이 프로젝트의 핵심 시연 장면이다 (PRD 9.2 / FR-09) */}
           <AmountGrid onSelect={withdraw} />
 
-          {state.state === "WITHDRAW_BLOCKED" && (
+          {/* 상담원이 이미 결론을 냈다면 다시 요청하게 두지 않는다 */}
+          {state.state === "WITHDRAW_BLOCKED" && !state.callcenter_resolution && (
             <button type="button" onClick={callCenter} className="btn-danger flex items-center justify-center gap-3">
               <Headset size={32} aria-hidden />
               상담원 확인 요청하기

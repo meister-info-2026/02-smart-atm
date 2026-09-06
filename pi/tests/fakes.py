@@ -25,6 +25,7 @@ class FakeBackend:
             },
         }
         self.status_action: dict[str, str] = {}
+        self.status_resolution: dict[str, str] = {}
         self.scans: list[tuple[str, str]] = []
         self.withdraw_reports: list[tuple[str, bool]] = []
         self.unavailable = False
@@ -45,7 +46,7 @@ class FakeBackend:
             "session_id": session_id,
             "action": self.status_action.get(session_id, "BLOCK"),
             "atm_status": "WITHDRAW_BLOCKED",
-            "callcenter_resolution": None,
+            "callcenter_resolution": self.status_resolution.get(session_id),
         }
 
     def report_withdraw_attempt(self, session_id: str, dispensed: bool) -> dict:

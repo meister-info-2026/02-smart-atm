@@ -17,8 +17,12 @@ router = APIRouter(prefix="/api/v1/chats", tags=["chats"])
 MESSAGE_PAGE_SIZE = 100
 
 
-def _require_membership(db: Session, chat_id: int, user_id: int) -> ChatRoom:
-    """내가 속한 채팅방인지 확인한다. 아니면 404로 존재 자체를 숨긴다."""
+def require_chat_membership(db: Session, chat_id: int, user_id: int) -> ChatRoom:
+    """내가 속한 채팅방인지 확인한다. 아니면 404로 존재 자체를 숨긴다.
+
+    분석 라우터도 같은 검사를 써야 하므로 공개 함수로 둔다 — 검사가 한 곳에만
+    있으면 한쪽 라우터에서 빠뜨리는 일이 생기지 않는다.
+    """
     room = db.get(ChatRoom, chat_id)
     member = (
         db.query(ChatRoomMember)
@@ -70,7 +74,7 @@ def list_messages(
     db: Session = Depends(get_db),
 ) -> dict:
     """채팅방의 메시지를 오래된 순으로 돌려준다."""
-    _require_membership(db, chat_id, current_user.id)
+    require_chat_membership(db, chat_id, current_user.id)
     rows = (
         db.query(Message)
         .filter(Message.chat_room_id == chat_id)
@@ -100,7 +104,7 @@ def create_message(
     db: Session = Depends(get_db),
 ) -> dict:
     """채팅방에 메시지를 추가한다 (받은 문자를 옮겨 적는 용도로도 쓴다)."""
-    _require_membership(db, chat_id, current_user.id)
+    require_chat_membership(db, chat_id, current_user.id)
     message = Message(
         chat_room_id=chat_id,
         sender_user_id=current_user.id,

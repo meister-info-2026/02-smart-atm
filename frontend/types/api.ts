@@ -90,6 +90,8 @@ export interface AtmDaemonState {
   summary: string;
   guidance: string;
   can_withdraw: boolean;
+  /** 상담원이 이미 확인을 끝냈으면 그 결과 (확인 전에는 null) */
+  callcenter_resolution: CallcenterResolution | null;
   last_error: string | null;
   offline: boolean;
 }

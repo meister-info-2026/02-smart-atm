@@ -175,3 +175,51 @@ def test_reset_returns_to_ready(controller: AtmController) -> None:
     controller.reset()
     assert controller.snapshot()["state"] == STATE_READY
     assert controller.snapshot()["session_id"] is None
+
+
+def test_call_center_maintain_stops_saying_please_wait(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """상담원이 '보이스피싱 — 제한 유지'를 누르면 '확인 중' 화면에서 빠져나온다.
+
+    결론이 났는데도 "상담원이 확인 중입니다. 잠시만 기다려 주세요"를 계속 띄우면
+    어르신은 끝나지 않을 기다림을 하게 된다 (FR-10).
+    """
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(controller.enter_call_center())
+    assert controller.state == STATE_CALL_CENTER
+
+    backend.status_resolution[DANGER_SESSION] = "MAINTAINED"
+    snapshot = asyncio.run(controller.refresh_from_backend())
+
+    assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
+    assert snapshot["callcenter_resolution"] == "MAINTAINED"
+    assert "기다려" not in snapshot["guidance"]
+    assert "계속 제한" in snapshot["guidance"]
+
+
+def test_maintained_session_still_never_dispenses(
+    controller: AtmController, backend: FakeBackend, provider: MockDeviceProvider
+) -> None:
+    """제한 유지로 확정된 뒤에도 출금 버튼은 여전히 아무것도 배출하지 않는다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(controller.enter_call_center())
+    backend.status_resolution[DANGER_SESSION] = "MAINTAINED"
+    asyncio.run(controller.refresh_from_backend())
+
+    asyncio.run(controller.request_withdraw(500000))
+    assert provider.dispense_count == 0
+
+
+def test_new_qr_clears_previous_callcenter_result(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """다음 사람의 QR을 읽으면 앞 사람의 콜센터 확인 결과를 끌고 가지 않는다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    backend.status_resolution[DANGER_SESSION] = "MAINTAINED"
+    asyncio.run(controller.refresh_from_backend())
+    assert controller.callcenter_resolution == "MAINTAINED"
+
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+    assert controller.callcenter_resolution is None
+    assert controller.snapshot()["state"] == STATE_WITHDRAW_ENABLED

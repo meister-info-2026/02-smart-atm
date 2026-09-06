@@ -29,9 +29,14 @@ _ACTION_TO_STATUS: dict[str, str] = {
 
 
 def next_session_id(db: Session) -> str:
-    """다음 ATM 세션 ID를 만든다 (예: VP-000003)."""
-    count = db.query(func.count(AtmSession.id)).scalar() or 0
-    return f"{SESSION_ID_PREFIX}{count + 1:0{SESSION_ID_DIGITS}d}"
+    """다음 ATM 세션 ID를 만든다 (예: VP-000003).
+
+    행 개수가 아니라 가장 큰 id를 기준으로 센다. 개수로 세면 세션을 한 건이라도
+    지운 뒤에는 이미 쓴 번호가 다시 나와, session_id UNIQUE 제약에 걸려 그 뒤
+    모든 분석 요청이 실패한다 (시연 정리하다 흔히 겪는다).
+    """
+    last_id = db.query(func.max(AtmSession.id)).scalar() or 0
+    return f"{SESSION_ID_PREFIX}{last_id + 1:0{SESSION_ID_DIGITS}d}"
 
 
 def action_to_atm_status(action: str) -> str:

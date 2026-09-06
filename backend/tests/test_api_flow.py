@@ -251,3 +251,119 @@ def test_regular_user_cannot_release_own_block(
 def test_me_exposes_role(client: TestClient, callcenter_headers: dict[str, str]) -> None:
     me = client.get("/api/v1/users/me", headers=callcenter_headers).json()["data"]
     assert me["role"] == "agent"
+
+
+# ── 디바이스가 스스로 제한을 풀 수 없다 (db-rules.md 경보성 디바이스 원칙) ──
+def test_device_cannot_open_withdrawal_without_callcenter(
+    client: TestClient, user_headers: dict[str, str], device_headers: dict[str, str]
+) -> None:
+    """ATM이 WITHDRAW_ENABLED를 보고해도 콜센터 확인 전에는 받아 주지 않는다.
+
+    이 검사가 없으면 디바이스 키를 가진 쪽이 스캔 보고 한 번으로 DANGER 판정을
+    뒤집을 수 있어, 사람의 확인을 거치게 한 설계 자체가 무의미해진다.
+    """
+    analysis = _analyze(client, user_headers, PHISHING_MESSAGE)
+    session_id = analysis["session_id"]
+
+    response = client.post(
+        "/api/v1/atm/scan",
+        json={"session_id": session_id, "atm_status": "WITHDRAW_ENABLED"},
+        headers=device_headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "RELEASE_NOT_AUTHORIZED"
+
+    status = client.get(
+        f"/api/v1/atm/session-status/{session_id}", headers=device_headers
+    ).json()["data"]
+    assert status["action"] == "BLOCK"
+    assert status["atm_status"] != "WITHDRAW_ENABLED"
+
+
+def test_device_may_report_enabled_after_callcenter_release(
+    client: TestClient,
+    user_headers: dict[str, str],
+    callcenter_headers: dict[str, str],
+    device_headers: dict[str, str],
+) -> None:
+    """반대로 상담원이 해제한 뒤에는 정상 보고로 받아들인다."""
+    analysis = _analyze(client, user_headers, PHISHING_MESSAGE)
+    session_id = analysis["session_id"]
+    client.post(
+        f"/api/v1/callcenter/resolve/{session_id}",
+        json={"resolution": "RELEASED"},
+        headers=callcenter_headers,
+    )
+
+    response = client.post(
+        "/api/v1/atm/scan",
+        json={"session_id": session_id, "atm_status": "WITHDRAW_ENABLED"},
+        headers=device_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["action"] == "ALLOW"
+
+
+def test_safe_session_may_be_reported_as_enabled(
+    client: TestClient, user_headers: dict[str, str], device_headers: dict[str, str]
+) -> None:
+    """SAFE 문자는 애초에 제한 대상이 아니므로 그대로 출금 가능으로 보고된다."""
+    analysis = _analyze(client, user_headers, NORMAL_MESSAGE)
+    response = client.post(
+        "/api/v1/atm/scan",
+        json={"session_id": analysis["session_id"], "atm_status": "WITHDRAW_ENABLED"},
+        headers=device_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["action"] == "ALLOW"
+
+
+# ── 남의 채팅방 문자를 분석 경로로 읽을 수 없다 ──────────────────────────────
+def test_analysis_rejects_other_users_chat_room(
+    client: TestClient, user_headers: dict[str, str]
+) -> None:
+    """내가 속하지 않은 채팅방은 분석 요청으로도 열어 볼 수 없다.
+
+    응답에 문자 원문이 실리므로, 목록 조회(GET /chats/{id}/messages)만 막고
+    이 경로를 열어 두면 남의 문자를 그대로 읽을 수 있다.
+    """
+    friend_headers = {
+        "Authorization": "Bearer "
+        + client.post(
+            "/api/v1/auth/login", json={"username": "friend01", "password": "test1234"}
+        ).json()["data"]["access_token"]
+    }
+    chats = client.get("/api/v1/chats", headers=user_headers).json()["data"]
+    other_room_id = chats[0]["id"]
+    assert client.get("/api/v1/chats", headers=friend_headers).json()["data"] == []
+
+    response = client.post(
+        f"/api/v1/analysis/chats/{other_room_id}", json={}, headers=friend_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "CHAT_NOT_FOUND"
+
+
+# ── 세션 번호는 지운 뒤에도 겹치지 않는다 ────────────────────────────────────
+def test_session_id_survives_deleted_rows(
+    client: TestClient, user_headers: dict[str, str]
+) -> None:
+    """시연 정리로 지난 세션을 지워도 다음 분석이 UNIQUE 제약에 걸리지 않는다.
+
+    번호를 '행 개수 + 1'로 매기면 오래된 행을 지우는 순간 살아 있는 번호가 다시
+    나와, 그 뒤 모든 분석 요청이 500으로 실패한다.
+    """
+    from db.database import SessionLocal
+    from db.models import AtmSession
+
+    older = _analyze(client, user_headers, PHISHING_MESSAGE)
+    newer = _analyze(client, user_headers, PHISHING_MESSAGE)
+
+    with SessionLocal() as db:  # 지난 세션 한 건만 정리한다
+        db.delete(
+            db.query(AtmSession).filter(AtmSession.session_id == older["session_id"]).one()
+        )
+        db.commit()
+
+    again = _analyze(client, user_headers, PHISHING_MESSAGE)
+    assert again["session_id"] != newer["session_id"]

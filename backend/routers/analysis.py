@@ -14,6 +14,7 @@ from analysis.rules import risk_level_to_action
 from api_responses import api_error, ok
 from db.database import get_db
 from db.models import AnalysisResult, AtmSession, Message, User
+from routers.chats import require_chat_membership
 from schemas.models import AnalysisResponse, AnalyzeRequest, AtmSessionResponse
 from security.jwt_auth import get_current_user
 from services import run_analysis
@@ -66,7 +67,12 @@ def analyze_chat_message(
     """채팅방에서 고른 메시지(message_id)를 분석한다.
 
     message_id가 없으면 채팅방의 가장 최근 메시지를 분석 대상으로 삼는다.
+
+    응답에 문자 원문(message_text)이 실리므로, 목록 조회와 똑같이 내가 속한
+    채팅방인지 먼저 확인한다 — 이 검사가 없으면 남의 문자를 이 경로로 읽을 수 있다.
     """
+    require_chat_membership(db, chat_id, current_user.id)
+
     if payload.message_id is not None:
         message = db.get(Message, payload.message_id)
         if message is None or message.chat_room_id != chat_id:
