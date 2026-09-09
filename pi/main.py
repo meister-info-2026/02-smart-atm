@@ -72,12 +72,24 @@ async def _poll_call_center() -> None:
         await asyncio.sleep(CALL_CENTER_POLL_SECONDS)
 
 
+async def _auto_reset_when_idle() -> None:
+    """앞사람이 남긴 화면을 치우고 기계를 다음 사람에게 넘긴다.
+
+    1초마다 보는 이유는 화면의 카운트다운과 어긋나지 않게 하기 위해서다.
+    실제로 되돌릴 것이 없으면 아무 일도 하지 않는다.
+    """
+    while not _stop.is_set():
+        controller.reset_if_idle()
+        await asyncio.sleep(1)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _event_loop
     _event_loop = asyncio.get_running_loop()
 
     poller = asyncio.create_task(_poll_call_center())
+    idle_watch = asyncio.create_task(_auto_reset_when_idle())
     camera_thread: threading.Thread | None = None
 
     if ENABLE_CAMERA:
@@ -100,6 +112,7 @@ async def lifespan(_app: FastAPI):
 
     _stop.set()
     poller.cancel()
+    idle_watch.cancel()
     if camera_thread:
         camera_thread.join(timeout=2)
 

@@ -95,6 +95,8 @@ export interface AtmDaemonState {
   last_error: string | null;
   /** 부스를 운영하는 사람이 고칠 수 있게 원인을 짚어 주는 한 줄 (평소에는 null) */
   operator_hint: string | null;
+  /** 다음 사람을 위해 대기 화면으로 돌아가기까지 남은 초 (셀 필요가 없으면 null) */
+  idle_reset_in: number | null;
   offline: boolean;
 }
 

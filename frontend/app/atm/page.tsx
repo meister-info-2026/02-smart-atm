@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Banknote, Headset, QrCode, RotateCcw, WifiOff } from "lucide-react";
+import { AlertTriangle, Banknote, Headset, QrCode, RotateCcw, Timer, WifiOff } from "lucide-react";
 import { VoiceToggle } from "@/components/VoiceToggle";
 import { useSpeech } from "@/hooks/useSpeech";
 import { ApiError, atmDaemon } from "@/lib/api";
@@ -194,6 +194,10 @@ export default function AtmScreen() {
         </div>
       )}
 
+      {/* 다음 사람을 위한 자동 초기화. 상담원을 기다리는 동안에는 데몬이 세지 않으므로
+          이 줄도 뜨지 않는다 — 기다리는 시간은 노는 시간이 아니다 */}
+      {state.idle_reset_in !== null && <IdleCountdown seconds={state.idle_reset_in} />}
+
       <footer className="flex w-full flex-wrap items-center justify-between gap-4 pt-4 text-lg text-slate-500">
         <span className="font-mono">{state.session_id ?? "세션 없음"}</span>
         <div className="flex items-center gap-3">
@@ -209,6 +213,24 @@ export default function AtmScreen() {
         </div>
       </footer>
     </AtmShell>
+  );
+}
+
+function IdleCountdown({ seconds }: { seconds: number }) {
+  // 마지막 10초는 눈에 띄게 — 관람객이 "곧 다음 사람 차례"라는 걸 알아야 한다
+  const urgent = seconds <= 10;
+  return (
+    <p
+      role="status"
+      className={`flex items-center gap-3 rounded-xl px-5 py-3 text-xl break-keep transition-colors duration-200 ${
+        urgent ? "bg-slate-900 text-white" : "text-slate-500"
+      }`}
+    >
+      <Timer size={24} className="shrink-0" aria-hidden />
+      <span>
+        <strong className="font-mono tabular-nums">{seconds}</strong>초 뒤 처음 화면으로 돌아갑니다
+      </span>
+    </p>
   );
 }
 

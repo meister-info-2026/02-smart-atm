@@ -4,6 +4,7 @@
 '실제로 동작하지 않는지'를 Mock Provider의 배출 카운터로 직접 확인한다.
 """
 import asyncio
+import time
 
 import pytest
 
@@ -403,3 +404,84 @@ def test_reset_returns_the_machine_to_the_next_customer(
     assert controller.snapshot()["can_withdraw"] is True
     assert asyncio.run(controller.request_withdraw(50000))["dispensed"] is True
     assert provider.dispense_count == 1
+
+
+# ── 다음 사람을 위한 자동 초기화 ─────────────────────────────────────────────
+@pytest.fixture
+def quick_reset(provider: MockDeviceProvider, backend: FakeBackend) -> AtmController:
+    """자동 초기화를 아주 짧게 잡은 컨트롤러 (테스트가 1분을 기다릴 수는 없다)."""
+    return AtmController(provider, backend, idle_reset_seconds=1)
+
+
+def test_no_countdown_when_nothing_to_clear(quick_reset: AtmController) -> None:
+    """아무 일도 없었던 평상시에는 셀 것이 없다 — 카운트다운도 뜨지 않는다."""
+    assert quick_reset.snapshot()["idle_reset_in"] is None
+    assert quick_reset.reset_if_idle() is False
+
+
+def test_blocked_screen_hands_the_machine_to_the_next_person(
+    quick_reset: AtmController, provider: MockDeviceProvider
+) -> None:
+    """앞사람이 남긴 차단 화면이 뒤에 온 사람에게 그대로 넘어가면 안 된다."""
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert quick_reset.snapshot()["idle_reset_in"] is not None  # 이제부터 센다
+
+    time.sleep(1.05)
+    assert quick_reset.reset_if_idle() is True
+
+    snapshot = quick_reset.snapshot()
+    assert snapshot["state"] == STATE_READY
+    assert snapshot["session_id"] is None
+    assert snapshot["can_withdraw"] is True, "다음 사람은 평범한 ATM을 만난다"
+
+
+def test_waiting_for_the_call_center_is_not_idling(quick_reset: AtmController) -> None:
+    """상담원을 기다리는 동안에는 세지 않는다.
+
+    이건 노는 시간이 아니라 **사람을 기다리는** 시간이다. 여기서 시계를 돌리면
+    확인이 오기도 전에 상담 자체가 사라지고, 시연 중에는 장면 5~6을 설명하는
+    사이에 화면이 저절로 초기화된다.
+    """
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(quick_reset.enter_call_center())
+    assert quick_reset.state == STATE_CALL_CENTER
+
+    assert quick_reset.snapshot()["idle_reset_in"] is None
+    time.sleep(1.05)
+    assert quick_reset.reset_if_idle() is False, "기다리는 중에 치워 버리면 안 된다"
+    assert quick_reset.state == STATE_CALL_CENTER
+
+
+def test_countdown_restarts_after_the_agent_answers(
+    quick_reset: AtmController, backend: FakeBackend
+) -> None:
+    """상담원이 답을 주면 기다림이 끝난다 — 그때부터 다시 센다."""
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(quick_reset.enter_call_center())
+    time.sleep(1.05)  # 기다리는 동안은 아무리 지나도 안 센다
+
+    backend.status_action[DANGER_SESSION] = "ALLOW"
+    asyncio.run(quick_reset.refresh_from_backend())
+
+    remaining = quick_reset.snapshot()["idle_reset_in"]
+    assert remaining is not None and remaining > 0, "답을 받은 순간부터 새로 센다"
+
+
+def test_any_action_restarts_the_countdown(quick_reset: AtmController) -> None:
+    """사람이 무언가를 하면 시계는 처음으로 돌아간다."""
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    time.sleep(0.7)
+    asyncio.run(quick_reset.request_withdraw(50000))  # 출금 버튼도 '동작'이다
+    time.sleep(0.7)
+    assert quick_reset.reset_if_idle() is False, "누른 지 0.7초밖에 안 됐다"
+
+
+def test_auto_reset_can_be_turned_off(
+    provider: MockDeviceProvider, backend: FakeBackend
+) -> None:
+    """리허설에서 화면을 오래 띄워 두고 싶을 때는 0으로 끈다."""
+    controller = AtmController(provider, backend, idle_reset_seconds=0)
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert controller.snapshot()["idle_reset_in"] is None
+    time.sleep(0.2)
+    assert controller.reset_if_idle() is False

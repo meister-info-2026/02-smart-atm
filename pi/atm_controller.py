@@ -13,7 +13,10 @@ qr-recognition-integration 스킬의 '로컬 판단 원칙':
 import asyncio
 import json
 import logging
+import math
+import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,6 +84,14 @@ GUIDANCE_MAINTAINED = "보이스피싱으로 확인되어 현금 출금을 계�
 
 # 설정이 잘못돼 서버 검증을 못 하는 상태. 어르신께는 기술적인 원인 대신 무엇을 해야
 # 하는지만 알려 주고, 진짜 원인은 로그에 남긴다 (관리자가 볼 곳은 로그다).
+# 다음 사람을 위한 자동 초기화. ATM은 공용 기계인데 앞사람이 남긴 화면이 계속
+# 떠 있으면, 뒤에 온 사람이 남의 차단을 물려받는다. 부스에서도 관람객마다
+# '처음으로'를 눌러 줄 수 없다.
+#
+# 이건 세션의 차단을 푸는 것이 아니다 — 차단은 서버에 그대로 남아 있고, 같은 QR을
+# 다시 비추면 즉시 다시 막힌다. 여기서 하는 일은 '기계를 다음 사람에게 넘기는 것'뿐이다.
+IDLE_RESET_SECONDS = int(os.getenv("IDLE_RESET_SECONDS", "60"))
+
 ERROR_DEVICE_AUTH = "지금은 이 ATM을 사용할 수 없습니다. 은행 직원에게 알려 주세요"
 ERROR_VERIFY_FAILED = "위험 정보를 확인하지 못했습니다. 처음부터 다시 진행해 주세요"
 
@@ -141,9 +152,18 @@ def parse_qr_payload(raw: str) -> QrPayload:
 class AtmController:
     """QR 인식 → 위험 판단 → 현금 배출 제어까지를 담당한다."""
 
-    def __init__(self, provider: Any, backend: BackendClient | None = None) -> None:
+    def __init__(
+        self,
+        provider: Any,
+        backend: BackendClient | None = None,
+        idle_reset_seconds: int | None = None,
+    ) -> None:
         self._provider = provider
         self._backend = backend
+        self._idle_reset_seconds = (
+            IDLE_RESET_SECONDS if idle_reset_seconds is None else idle_reset_seconds
+        )
+        self._last_touch: float = time.monotonic()
         self.state: str = STATE_READY
         self.session_id: str | None = None
         self.risk_level: str | None = None
@@ -154,6 +174,41 @@ class AtmController:
         self.last_error: str | None = None
         self.operator_hint: str | None = None
         self.offline: bool = False
+
+    # ── 다음 사람에게 넘기기 ────────────────────────────────────────────────
+    def touch(self) -> None:
+        """사람이 무언가를 했다 — 자동 초기화 시계를 처음으로 되돌린다."""
+        self._last_touch = time.monotonic()
+
+    @property
+    def idle_reset_in(self) -> int | None:
+        """자동 초기화까지 남은 초. 셀 필요가 없으면 None.
+
+        세지 않는 두 경우가 있다.
+          - 아직 아무 일도 없었던 평상시: 되돌릴 것이 없다.
+          - 상담원 확인을 기다리는 중: 이건 노는 게 아니라 **사람을 기다리는**
+            시간이다. 여기서 시계를 돌리면 확인이 오기도 전에 상담 자체가
+            사라지고, 시연 중에는 설명하는 사이에 화면이 저절로 초기화된다.
+        """
+        if self._idle_reset_seconds <= 0:
+            return None
+        if self.state == STATE_CALL_CENTER:
+            return None
+        if self.session_id is None and self.last_error is None:
+            return None
+        elapsed = time.monotonic() - self._last_touch
+        # 올림으로 센다. 반올림하면 아직 0.4초 남았는데 "0초"로 보이고, 그 0을
+        # 본 순간 초기화가 일어나 화면이 1초 먼저 사라진 것처럼 보인다.
+        return max(0, math.ceil(self._idle_reset_seconds - elapsed))
+
+    def reset_if_idle(self) -> bool:
+        """시간이 다 됐으면 대기 상태로 돌려놓는다. 실제로 되돌렸으면 True."""
+        remaining = self.idle_reset_in
+        if remaining is None or remaining > 0:
+            return False
+        logger.info("무동작 %d초 — 다음 사용자를 위해 초기화합니다", self._idle_reset_seconds)
+        self.reset()
+        return True
 
     # ── 조회 ────────────────────────────────────────────────────────────────
     @property
@@ -198,11 +253,13 @@ class AtmController:
             "callcenter_resolution": self.callcenter_resolution,
             "last_error": self.last_error,
             "operator_hint": self.operator_hint,
+            "idle_reset_in": self.idle_reset_in,
             "offline": self.offline,
         }
 
     def reset(self) -> None:
         """다음 사용자를 위해 대기 상태로 되돌린다."""
+        self.touch()
         self.state = STATE_READY
         self.session_id = None
         self.risk_level = None
@@ -217,6 +274,7 @@ class AtmController:
     # ── QR 인식 ─────────────────────────────────────────────────────────────
     async def handle_qr(self, raw: str) -> dict[str, Any]:
         """QR 한 건을 처리해 ATM 상태를 갱신한다."""
+        self.touch()
         try:
             payload = parse_qr_payload(raw)
         except InvalidQrError as exc:
@@ -306,6 +364,7 @@ class AtmController:
         막는 것은 '위험이 확인된 세션'이지 '확인되지 않은 사람'이 아니다.
         평상시(READY)에는 보통 ATM처럼 돈이 나온다.
         """
+        self.touch()
         if not self.can_dispense:
             # 액추에이터를 아예 건드리지 않는다 — 배출 장치는 움직이지 않는다
             logger.info("출금 차단 (state=%s, session=%s)", self.state, self.session_id)
@@ -322,6 +381,7 @@ class AtmController:
     # ── 콜센터 확인 폴링 ────────────────────────────────────────────────────
     async def enter_call_center(self) -> dict[str, Any]:
         """콜센터 확인 단계로 넘어간다 (제한은 유지된 상태)."""
+        self.touch()
         if self.state == STATE_WITHDRAW_BLOCKED:
             self.state = STATE_CALL_CENTER
             await self._report_scan()
@@ -349,6 +409,7 @@ class AtmController:
             return self.snapshot()
 
         self.offline = False
+        was_waiting = self.state == STATE_CALL_CENTER
         self.callcenter_resolution = status.get("callcenter_resolution")
         action = status.get("action", ACTION_BLOCK)
         if action == ACTION_ALLOW:
@@ -360,6 +421,9 @@ class AtmController:
         elif self.state == STATE_WITHDRAW_ENABLED:
             # 서버가 다시 막았다면 즉시 반영한다
             self.state = STATE_WITHDRAW_BLOCKED
+        if was_waiting and self.state != STATE_CALL_CENTER:
+            # 상담원이 답을 줬다. 기다림이 끝났으니 이제부터 자동 초기화 시계가 돈다
+            self.touch()
         return self.snapshot()
 
     # ── 보고 (실패해도 ATM 동작은 계속된다) ─────────────────────────────────
