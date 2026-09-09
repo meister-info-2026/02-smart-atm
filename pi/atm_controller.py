@@ -70,6 +70,11 @@ RESOLUTION_MAINTAINED = "MAINTAINED"
 # 세션에서만** 막는다 (PRD: "평범한 문자는 시스템이 건드리지 않는다").
 DISPENSING_STATES: frozenset[str] = frozenset({STATE_READY, STATE_WITHDRAW_ENABLED})
 
+# 반대로, 이 기계가 지금 '풀리지 않은 제한'을 붙잡고 있는 상태들.
+# 여기 있는 동안에는 기계를 그냥 다음 사람에게 넘기지 않는다 — 제한을 푸는 것은
+# 시간도, 버튼도 아니고 사람이다 (db-rules.md: 제한은 시스템이 스스로 풀지 않는다).
+RESTRICTED_STATES: frozenset[str] = frozenset({STATE_WITHDRAW_BLOCKED, STATE_CALL_CENTER})
+
 # 노약자용 큰 글씨 안내 문구 (FR-10) — 화면은 이 문구를 그대로 크게 띄운다
 GUIDANCE: dict[str, str] = {
     STATE_READY: "출금하실 금액을 선택해 주세요",
@@ -100,6 +105,9 @@ ERROR_VERIFY_FAILED = "위험 정보를 확인하지 못했습니다. 처음부�
 # 그래서 화면 구석에 '고치는 사람용' 한 줄을 따로 띄운다.
 HINT_DEVICE_AUTH = "설정 오류: DEVICE_API_KEY 불일치 — backend/.env와 pi/.env를 같게 맞추고 데몬을 다시 켜세요"
 HINT_VERIFY_FAILED = "서버 응답을 처리하지 못했습니다 — ATM 데몬 터미널의 로그를 확인하세요"
+
+# 잠긴 기계를 사람이 아닌 방법으로 열려고 했을 때
+ERROR_OTHER_QR = "다른 QR로는 잠금이 풀리지 않습니다. 상담원 확인을 받아 주세요"
 
 
 @dataclass
@@ -184,15 +192,17 @@ class AtmController:
     def idle_reset_in(self) -> int | None:
         """자동 초기화까지 남은 초. 셀 필요가 없으면 None.
 
-        세지 않는 두 경우가 있다.
+        세지 않는 경우가 셋 있다.
           - 아직 아무 일도 없었던 평상시: 되돌릴 것이 없다.
-          - 상담원 확인을 기다리는 중: 이건 노는 게 아니라 **사람을 기다리는**
-            시간이다. 여기서 시계를 돌리면 확인이 오기도 전에 상담 자체가
-            사라지고, 시연 중에는 설명하는 사이에 화면이 저절로 초기화된다.
+          - 제한이 걸려 있는 중(차단 · 상담원 확인): 시간이 지났다고 제한이 풀리면
+            막힌 사람은 **가만히 1분만 기다렸다가** 돈을 찾으면 된다. 그건 차단이
+            아니다. 상담원을 기다리는 시간도 노는 시간이 아니다.
+          - 설정 오류로 서버에 물어보지 못하는 중: '보호 장치가 꺼져 있다'는 표시를
+            시간이 지워 버리면, 고장 난 줄도 모른 채 계속 돈이 나간다.
         """
         if self._idle_reset_seconds <= 0:
             return None
-        if self.state == STATE_CALL_CENTER:
+        if self.restricted or self.operator_hint is not None:
             return None
         if self.session_id is None and self.last_error is None:
             return None
@@ -207,10 +217,16 @@ class AtmController:
         if remaining is None or remaining > 0:
             return False
         logger.info("무동작 %d초 — 다음 사용자를 위해 초기화합니다", self._idle_reset_seconds)
-        self.reset()
-        return True
+        # reset()이 한 번 더 판단한다. 위 조건과 어긋나는 순간이 생기더라도
+        # '시간이 제한을 푸는' 일만은 일어나지 않게 이중으로 막는다.
+        return self.reset()
 
     # ── 조회 ────────────────────────────────────────────────────────────────
+    @property
+    def restricted(self) -> bool:
+        """이 기계가 지금 붙잡고 있는 제한이 있는가 (아직 사람이 풀지 않았다)."""
+        return self.state in RESTRICTED_STATES
+
     @property
     def can_dispense(self) -> bool:
         """지금 이 사람에게 현금을 내줘도 되는가.
@@ -250,6 +266,7 @@ class AtmController:
             "summary": self.summary,
             "guidance": self.guidance,
             "can_withdraw": self.can_dispense,
+            "restricted": self.restricted,
             "callcenter_resolution": self.callcenter_resolution,
             "last_error": self.last_error,
             "operator_hint": self.operator_hint,
@@ -257,8 +274,43 @@ class AtmController:
             "offline": self.offline,
         }
 
-    def reset(self) -> None:
-        """다음 사용자를 위해 대기 상태로 되돌린다."""
+    def reset(self) -> bool:
+        """'처음으로' — 다음 사용자를 위해 대기 상태로 되돌린다. 되돌렸으면 True.
+
+        제한이 살아 있으면 되돌리지 않는다. 이 버튼 하나로 차단이 풀린다면
+        막힌 사람은 그냥 그 버튼을 누르면 되고, 그러면 이 작품은 아무것도 막지
+        못한다. 설정 오류(operator_hint)도 마찬가지다 — 서버에 물어보지 못하는
+        상태를 버튼으로 지워 봐야, 보호 장치가 꺼진 채로 화면만 멀쩡해진다.
+
+        푸는 사람은 둘뿐이다. 상담원이 콜센터 화면에서 해제하거나, 은행 직원이
+        확인하고 staff_release()를 부른다.
+        """
+        if self.restricted or self.operator_hint is not None:
+            logger.info(
+                "초기화 거부 — 사람이 풀어야 합니다 (state=%s, hint=%s)",
+                self.state,
+                bool(self.operator_hint),
+            )
+            return False
+        self._clear()
+        return True
+
+    def staff_release(self) -> None:
+        """은행 직원이 확인하고 기계를 다시 연다 — 제한을 푸는 사람 쪽 통로.
+
+        서버의 판정을 지우는 것이 아니다. 제한은 서버에 그대로 남아 있어서,
+        같은 QR을 다시 비추면 즉시 다시 막힌다. 여기서 하는 일은 '이 기계를
+        다음 사람에게 넘기는 것'뿐이다.
+        """
+        logger.warning(
+            "직원 해제 — 사람이 기계를 다시 열었습니다 (state=%s, session=%s)",
+            self.state,
+            self.session_id,
+        )
+        self._clear()
+
+    def _clear(self) -> None:
+        """화면과 상태를 실제로 비운다 (누가 시켰는지는 부르는 쪽이 판단한다)."""
         self.touch()
         self.state = STATE_READY
         self.session_id = None
@@ -287,17 +339,31 @@ class AtmController:
         if verified is None:
             return self.snapshot()
 
+        risk_level = verified.get("risk_level")
+        action = verified.get("action") or RISK_TO_ACTION.get(risk_level or "", ACTION_BLOCK)
+        state = ACTION_TO_STATE.get(action, STATE_WITHDRAW_BLOCKED)
+
+        # 잠긴 기계는 '다른 QR'로 열리지 않는다. 안전한 문자 하나를 새로 분석해
+        # QR을 만들면 차단이 풀린다면, 막힌 사람은 그렇게 하면 그만이다.
+        # (같은 세션을 다시 비추는 것은 다르다 — 상담원이 해제했다면 그때 열린다)
+        if (
+            self.restricted
+            and state == STATE_WITHDRAW_ENABLED
+            and payload.session_id != self.session_id
+        ):
+            logger.warning("제한 중 다른 QR(%s)로 해제 시도 — 거부", payload.session_id)
+            self.last_error = ERROR_OTHER_QR
+            return self.snapshot()
+
         self.session_id = payload.session_id
-        self.risk_level = verified.get("risk_level")
+        self.risk_level = risk_level
         self.risk_score = verified.get("risk_score")
         self.reasons = list(verified.get("reasons") or [])
         self.summary = verified.get("summary") or ""
         self.callcenter_resolution = None  # 새 세션이므로 앞 사람의 확인 결과를 지운다
         self.last_error = None
         self.operator_hint = None
-
-        action = verified.get("action") or RISK_TO_ACTION.get(self.risk_level or "", ACTION_BLOCK)
-        self.state = ACTION_TO_STATE.get(action, STATE_WITHDRAW_BLOCKED)
+        self.state = state
 
         if self.state == STATE_WITHDRAW_BLOCKED:
             await self._warn()

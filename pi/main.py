@@ -162,8 +162,21 @@ async def call_center() -> dict:
 
 @app.post("/reset")
 async def reset() -> dict:
-    """다음 사용자를 위해 대기 상태로 되돌린다."""
-    controller.reset()
+    """'처음으로' — 제한이 걸려 있지 않을 때만 되돌린다.
+
+    거부됐는지 화면이 알아야 하므로 결과를 함께 돌려준다.
+    """
+    done = controller.reset()
+    return {"data": {**controller.snapshot(), "reset": done}}
+
+
+@app.post("/staff-release")
+async def staff_release() -> dict:
+    """은행 직원 확인 — 잠긴 기계를 사람이 다시 연다.
+
+    서버의 제한을 지우는 것이 아니다. 같은 QR을 다시 비추면 즉시 다시 막힌다.
+    """
+    controller.staff_release()
     return {"data": controller.snapshot()}
 
 

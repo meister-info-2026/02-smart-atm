@@ -90,6 +90,8 @@ export interface AtmDaemonState {
   summary: string;
   guidance: string;
   can_withdraw: boolean;
+  /** 아직 사람이 풀지 않은 제한을 이 기계가 붙잡고 있는가 (차단 · 상담원 확인 중) */
+  restricted: boolean;
   /** 상담원이 이미 확인을 끝냈으면 그 결과 (확인 전에는 null) */
   callcenter_resolution: CallcenterResolution | null;
   last_error: string | null;

@@ -172,8 +172,9 @@ def test_offline_without_risk_level_refuses_to_guess(
 
 
 def test_reset_returns_to_ready(controller: AtmController) -> None:
-    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
-    controller.reset()
+    """볼일이 끝난 화면은 '처음으로'로 정리된다 (제한이 없을 때의 이야기다)."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+    assert controller.reset() is True
     assert controller.snapshot()["state"] == STATE_READY
     assert controller.snapshot()["session_id"] is None
 
@@ -215,12 +216,17 @@ def test_maintained_session_still_never_dispenses(
 def test_new_qr_clears_previous_callcenter_result(
     controller: AtmController, backend: FakeBackend
 ) -> None:
-    """다음 사람의 QR을 읽으면 앞 사람의 콜센터 확인 결과를 끌고 가지 않는다."""
+    """다음 사람의 QR을 읽으면 앞 사람의 콜센터 확인 결과를 끌고 가지 않는다.
+
+    단, 앞 사람의 제한이 살아 있는 동안에는 애초에 다음 사람 차례가 아니다 —
+    직원이 기계를 열어 준 뒤부터가 '다음 사람'이다.
+    """
     asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
     backend.status_resolution[DANGER_SESSION] = "MAINTAINED"
     asyncio.run(controller.refresh_from_backend())
     assert controller.callcenter_resolution == "MAINTAINED"
 
+    controller.staff_release()
     asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
     assert controller.callcenter_resolution is None
     assert controller.snapshot()["state"] == STATE_WITHDRAW_ENABLED
@@ -419,20 +425,106 @@ def test_no_countdown_when_nothing_to_clear(quick_reset: AtmController) -> None:
     assert quick_reset.reset_if_idle() is False
 
 
-def test_blocked_screen_hands_the_machine_to_the_next_person(
+def test_time_alone_never_unlocks_a_blocked_machine(
     quick_reset: AtmController, provider: MockDeviceProvider
 ) -> None:
-    """앞사람이 남긴 차단 화면이 뒤에 온 사람에게 그대로 넘어가면 안 된다."""
+    """가만히 기다리는 것으로 차단이 풀리면 안 된다.
+
+    자동 초기화(다음 사람을 위한 편의)와 '평상시에는 돈이 나온다'(공용 기계)가
+    겹치면, 막힌 사람은 아무것도 하지 않고 1분만 서 있다가 50만 원을 찾을 수
+    있다. 실제로 그렇게 나왔다 — 이 작품이 막는다고 말한 그 장면이 1분 뒤에
+    통째로 무너졌다. 제한을 푸는 것은 시간이 아니라 사람이다.
+    """
     asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
-    assert quick_reset.snapshot()["idle_reset_in"] is not None  # 이제부터 센다
+    assert quick_reset.snapshot()["idle_reset_in"] is None, "차단 중에는 세지 않는다"
 
     time.sleep(1.05)
-    assert quick_reset.reset_if_idle() is True
+    assert quick_reset.reset_if_idle() is False
 
     snapshot = quick_reset.snapshot()
+    assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
+    assert snapshot["can_withdraw"] is False
+    assert asyncio.run(quick_reset.request_withdraw(500000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_maintained_block_survives_the_clock(
+    quick_reset: AtmController, backend: FakeBackend, provider: MockDeviceProvider
+) -> None:
+    """상담원이 '보이스피싱 맞다'고 확정한 뒤라면 더더욱 풀리면 안 된다."""
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    backend.status_resolution[DANGER_SESSION] = "MAINTAINED"
+    asyncio.run(quick_reset.refresh_from_backend())
+
+    time.sleep(1.05)
+    quick_reset.reset_if_idle()
+
+    assert asyncio.run(quick_reset.request_withdraw(500000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_press_start_over_does_not_lift_a_block(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """화면의 '처음으로'가 해제 버튼이 되면 안 된다 — 누구나 한 번 누르면 그만이다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+
+    assert controller.reset() is False, "제한이 살아 있으면 되돌리지 않는다"
+    assert controller.state == STATE_WITHDRAW_BLOCKED
+    assert asyncio.run(controller.request_withdraw(500000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_staff_release_is_the_way_back(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """대신 사람이 푼다 — 은행 직원이 확인하면 기계는 다음 사람에게 넘어간다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    controller.staff_release()
+
+    snapshot = controller.snapshot()
     assert snapshot["state"] == STATE_READY
     assert snapshot["session_id"] is None
-    assert snapshot["can_withdraw"] is True, "다음 사람은 평범한 ATM을 만난다"
+    assert snapshot["can_withdraw"] is True
+    assert asyncio.run(controller.request_withdraw(50000))["dispensed"] is True
+
+    # 서버의 판정까지 지운 것은 아니다 — 같은 QR을 다시 비추면 즉시 다시 막힌다
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert controller.state == STATE_WITHDRAW_BLOCKED
+
+
+def test_another_qr_cannot_unlock_a_blocked_machine(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """안전한 문자로 QR을 새로 만들어 오면 풀린다면, 그것도 해제 버튼이다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+
+    snapshot = asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+    assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
+    assert snapshot["session_id"] == DANGER_SESSION, "앞 세션이 그대로 살아 있어야 한다"
+    assert snapshot["can_withdraw"] is False
+    assert asyncio.run(controller.request_withdraw(500000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_config_error_does_not_expire_on_its_own(
+    quick_reset: AtmController, backend: FakeBackend
+) -> None:
+    """키가 틀려 서버에 못 물어보는 상태를 시간이 지워 버리면 안 된다.
+
+    지우고 나면 화면은 멀쩡한 ATM으로 돌아가지만, 보호 장치는 여전히 꺼져 있다.
+    아무도 모르는 채로 위험한 세션까지 통과하게 된다.
+    """
+    backend.auth_rejected = True
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert quick_reset.snapshot()["operator_hint"] is not None
+    assert quick_reset.snapshot()["idle_reset_in"] is None, "설정 오류는 세지 않는다"
+
+    time.sleep(1.05)
+    assert quick_reset.reset_if_idle() is False
+    assert quick_reset.reset() is False
+    assert quick_reset.snapshot()["operator_hint"] is not None
+    assert quick_reset.snapshot()["can_withdraw"] is False
 
 
 def test_waiting_for_the_call_center_is_not_idling(quick_reset: AtmController) -> None:
@@ -469,7 +561,7 @@ def test_countdown_restarts_after_the_agent_answers(
 
 def test_any_action_restarts_the_countdown(quick_reset: AtmController) -> None:
     """사람이 무언가를 하면 시계는 처음으로 돌아간다."""
-    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(quick_reset.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
     time.sleep(0.7)
     asyncio.run(quick_reset.request_withdraw(50000))  # 출금 버튼도 '동작'이다
     time.sleep(0.7)
@@ -481,7 +573,7 @@ def test_auto_reset_can_be_turned_off(
 ) -> None:
     """리허설에서 화면을 오래 띄워 두고 싶을 때는 0으로 끈다."""
     controller = AtmController(provider, backend, idle_reset_seconds=0)
-    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
     assert controller.snapshot()["idle_reset_in"] is None
     time.sleep(0.2)
     assert controller.reset_if_idle() is False

@@ -94,7 +94,7 @@ def scenario_safe(user: dict[str, str]) -> None:
     result = analyze(user, NORMAL_MESSAGE)
     check("분석 결과가 SAFE", result["risk_level"] == "SAFE", f"score={result['risk_score']}")
 
-    atm_post("/reset")
+    atm_post("/staff-release")
     state = atm_post("/qr", {"data": make_and_read_qr(result["session_id"])})
     check("ATM이 출금 가능 상태로 전환", state["state"] == "WITHDRAW_ENABLED")
 
@@ -109,12 +109,20 @@ def scenario_danger(user: dict[str, str], agent: dict[str, str]) -> None:
     check("탐지 근거가 표시됨 (FR-04)", len(result["reasons"]) > 0, ", ".join(result["reasons"]))
     session_id = result["session_id"]
 
-    atm_post("/reset")
+    atm_post("/staff-release")
     state = atm_post("/qr", {"data": make_and_read_qr(session_id)})
     check("ATM이 출금 제한 상태로 전환 (FR-07)", state["state"] == "WITHDRAW_BLOCKED")
 
     blocked = atm_post("/withdraw", {"amount": 500000})
     check("출금 버튼을 눌러도 배출되지 않음 (FR-09)", blocked["dispensed"] is False)
+    check("기다린다고 풀리지 않음 (자동 초기화가 세지 않는다)", blocked["idle_reset_in"] is None)
+
+    refused = atm_post("/reset")
+    check(
+        "'처음으로'를 눌러도 제한이 풀리지 않음",
+        refused["reset"] is False and refused["state"] == "WITHDRAW_BLOCKED",
+    )
+    check("거부 뒤에도 여전히 배출 불가", atm_post("/withdraw", {"amount": 500000})["dispensed"] is False)
 
     atm_post("/call-center")
     check("콜센터 확인 단계로 전환 (FR-11)", wait_for_state("CALL_CENTER")["state"] == "CALL_CENTER")
@@ -141,7 +149,7 @@ def scenario_danger(user: dict[str, str], agent: dict[str, str]) -> None:
 
 def scenario_bad_qr() -> None:
     print("\n[시나리오 3] 잘못된 QR → 거래 제어에 사용하지 않음 (PRD 10.4 / TC-04)")
-    atm_post("/reset")
+    atm_post("/staff-release")
     state = atm_post("/qr", {"data": '{"session_id": "VP-999999"}'})
     check("등록되지 않은 QR을 거부", state["state"] == "READY" and bool(state["last_error"]))
     check("현금 배출 불가", atm_post("/withdraw", {"amount": 50000})["dispensed"] is False)
@@ -197,7 +205,7 @@ def main() -> int:
     scenario_bad_qr()
     scenario_callcenter_permission(user)
     scenario_device_auth()
-    atm_post("/reset")
+    atm_post("/staff-release")
 
     print("\n" + "=" * 60)
     if failures:

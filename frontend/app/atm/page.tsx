@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Banknote, Headset, QrCode, RotateCcw, Timer, WifiOff } from "lucide-react";
+import {
+  AlertTriangle,
+  Banknote,
+  Headset,
+  KeyRound,
+  QrCode,
+  RotateCcw,
+  Timer,
+  WifiOff,
+} from "lucide-react";
 import { VoiceToggle } from "@/components/VoiceToggle";
 import { useSpeech } from "@/hooks/useSpeech";
 import { ApiError, atmDaemon } from "@/lib/api";
@@ -19,6 +28,8 @@ export default function AtmScreen() {
   const [state, setState] = useState<AtmDaemonState | null>(null);
   const [daemonError, setDaemonError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // '처음으로'가 거절당했을 때만 직원 해제 버튼을 꺼내 놓는다 (평소에는 없다)
+  const [askStaff, setAskStaff] = useState(false);
   const speech = useSpeech();
   const lastStateRef = useRef<string | null>(null);
 
@@ -30,6 +41,7 @@ export default function AtmScreen() {
       // 어르신은 아직 막혀 있다고 읽는다.
       if (lastStateRef.current !== null && lastStateRef.current !== next.state) {
         setNotice(null);
+        setAskStaff(false);
       }
       lastStateRef.current = next.state;
       setState(next);
@@ -88,9 +100,34 @@ export default function AtmScreen() {
     setNotice(null);
   };
 
+  // '처음으로'는 화면을 정리하는 버튼이지 제한을 푸는 버튼이 아니다.
+  // 이 버튼으로 차단이 풀린다면 막힌 사람은 그냥 이걸 누르면 그만이다.
   const reset = async () => {
-    setState(await atmDaemon.post<AtmDaemonState>("/reset"));
+    const next = await atmDaemon.post<AtmDaemonState & { reset: boolean }>("/reset");
+    setState(next);
+    if (next.reset) {
+      setNotice(null);
+      setAskStaff(false);
+      return;
+    }
+    // 왜 거절됐는지에 따라 다르게 말한다 — 설정 오류인데 "보이스피싱"이라고
+    // 하면, 고쳐야 할 사람이 엉뚱한 곳을 뒤진다
+    if (next.state === "CALL_CENTER") {
+      setNotice("상담원이 확인 중입니다. 확인이 끝나거나 은행 직원이 해제해야 열립니다.");
+    } else if (next.restricted) {
+      setNotice("보이스피싱 확인으로 잠긴 화면입니다. 은행 직원이 확인해야 다시 열립니다.");
+    } else {
+      setNotice("설정 오류로 멈춰 있습니다. 아래 안내대로 고친 뒤 다시 시작해 주세요.");
+    }
+    setAskStaff(true);
+  };
+
+  // 은행 직원 확인. 서버의 판정을 지우는 것이 아니라 기계를 다음 사람에게 넘기는
+  // 것이므로, 같은 QR을 다시 비추면 즉시 다시 막힌다.
+  const staffRelease = async () => {
+    setState(await atmDaemon.post<AtmDaemonState>("/staff-release"));
     setNotice(null);
+    setAskStaff(false);
   };
 
   if (daemonError) {
@@ -111,7 +148,12 @@ export default function AtmScreen() {
     );
   }
 
-  const blocked = state.state === "WITHDRAW_BLOCKED" || state.state === "CALL_CENTER";
+  // 제한 여부는 데몬이 판단한 값을 그대로 쓴다 — 같은 규칙을 화면에서 또 적으면
+  // 언젠가 둘이 어긋난다 (어긋나는 순간 화면이 거짓말을 한다)
+  const blocked = state.restricted;
+  // 출금 화면도 차단 화면도 아닌 상태 — 확인을 하지 못해 잠시 멈춘 화면이다.
+  // 여기에 아무 그림도 제목도 없으면 노란 띠 한 줄만 떠 있는 허전한 화면이 된다.
+  const halted = !state.can_withdraw && !blocked;
 
   return (
     <AtmShell tone={blocked ? "danger" : "neutral"}>
@@ -172,6 +214,15 @@ export default function AtmScreen() {
         </>
       )}
 
+      {halted && (
+        <>
+          <AlertTriangle size={88} className="text-amber-500" aria-hidden />
+          <p className="text-4xl font-bold leading-snug text-slate-900 break-keep">
+            {state.last_error ?? "잠시만 기다려 주세요"}
+          </p>
+        </>
+      )}
+
       {notice && (
         <p
           role="status"
@@ -181,17 +232,31 @@ export default function AtmScreen() {
         </p>
       )}
 
-      {state.last_error && (
+      {askStaff && (
+        <button
+          type="button"
+          onClick={staffRelease}
+          /* 손님용 버튼처럼 보이면 안 된다 — 금액 버튼과 크기·굵기를 확실히 다르게 둔다 */
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl border-2 border-slate-400 bg-white px-5 py-3 text-lg font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-50"
+        >
+          <KeyRound size={28} aria-hidden />
+          직원 확인 후 해제
+        </button>
+      )}
+
+      {/* 이미 큰 글씨로 띄운 문구(halted)를 아래에 또 적지 않는다 */}
+      {state.last_error && !halted && (
         <div role="alert" className="w-full rounded-2xl bg-amber-100 px-6 py-4 text-center break-keep">
           <p className="text-2xl text-amber-900">{state.last_error}</p>
-          {/* 어르신께 드리는 안내와 고치는 사람에게 주는 단서를 분리한다.
-              작게 두어 시연을 방해하지 않으면서, 원인을 찾아 헤매지 않게 한다 */}
-          {state.operator_hint && (
-            <p className="mt-3 border-t border-amber-300 pt-3 font-mono text-sm text-amber-800">
-              {state.operator_hint}
-            </p>
-          )}
         </div>
+      )}
+
+      {/* 어르신께 드리는 안내와 고치는 사람에게 주는 단서를 분리한다.
+          작게 두어 시연을 방해하지 않으면서, 원인을 찾아 헤매지 않게 한다 */}
+      {state.operator_hint && (
+        <p className="w-full rounded-xl bg-amber-100 px-5 py-3 text-center font-mono text-sm text-amber-800 break-keep">
+          {state.operator_hint}
+        </p>
       )}
 
       {/* 다음 사람을 위한 자동 초기화. 상담원을 기다리는 동안에는 데몬이 세지 않으므로
