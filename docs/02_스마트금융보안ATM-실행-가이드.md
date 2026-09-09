@@ -207,7 +207,8 @@ python scripts/demo_e2e.py
 | 콜센터 화면에 "실시간 이벤트 연결이 거부되었습니다" | `/ws`는 상담원 토큰을 요구한다. `callcenter` 계정으로 다시 로그인한다 (일반 사용자 계정으로는 붙을 수 없다) |
 | 로그인이 계속 401 | `python -m db.seed`를 안 돌렸거나 비밀번호가 다르다. seed 출력 확인 |
 | ATM API가 401 | `pi/.env`와 `backend/.env`의 `DEVICE_API_KEY`가 다르다 |
-| ATM 화면에 "지금은 이 ATM을 사용할 수 없습니다" | 위와 같은 원인(키 불일치)이다. 데몬 로그에 `디바이스 인증 실패`가 찍힌다. 두 `.env`의 `DEVICE_API_KEY`를 맞추고 **데몬을 껐다 다시 켠다**(시작할 때 한 번만 읽는다) |
+| ATM 화면에 "지금은 이 ATM을 사용할 수 없습니다" | 키 불일치다. **그 문구 아래 작은 글씨에 고칠 것이 적혀 있다.** 두 `.env`의 `DEVICE_API_KEY`를 맞추고 **데몬을 껐다 다시 켠다**(시작할 때 한 번만 읽는다) |
+| 정상 문자인데도 출금 화면으로 안 바뀐다 | 십중팔구 위와 같은 인증 실패다. 서버 확인을 못 하면 거래를 열지 않는 것이 정상 동작이다. 화면 아래 작은 글씨와 데몬 로그를 본다 |
 | 파이에서 백엔드에 못 붙는다 | `BACKEND_URL`이 `localhost`로 되어 있다. PC의 실제 IP로 바꾼다 |
 | 파이에서 `ModuleNotFoundError: No module named 'iot'` | `pi/`만 복사했다. `backend/`가 같은 상위 폴더에 나란히 있어야 한다 (4-2 참고) |
 | `gpiozero` 오류 | Pi 5는 `lgpio`가 필요하다. `pip install lgpio` 후 `GPIOZERO_PIN_FACTORY=lgpio` |

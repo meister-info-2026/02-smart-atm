@@ -93,6 +93,8 @@ export interface AtmDaemonState {
   /** 상담원이 이미 확인을 끝냈으면 그 결과 (확인 전에는 null) */
   callcenter_resolution: CallcenterResolution | null;
   last_error: string | null;
+  /** 부스를 운영하는 사람이 고칠 수 있게 원인을 짚어 주는 한 줄 (평소에는 null) */
+  operator_hint: string | null;
   offline: boolean;
 }
 

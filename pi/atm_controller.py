@@ -77,6 +77,12 @@ GUIDANCE_MAINTAINED = "보이스피싱으로 확인되어 현금 출금을 계�
 ERROR_DEVICE_AUTH = "지금은 이 ATM을 사용할 수 없습니다. 은행 직원에게 알려 주세요"
 ERROR_VERIFY_FAILED = "위험 정보를 확인하지 못했습니다. 처음부터 다시 진행해 주세요"
 
+# 위 문구는 어르신용이라 원인을 담지 않는다. 그런데 부스를 운영하는 사람은 화면만
+# 보고 있다 — 원인을 알려면 데몬 터미널을 봐야 한다는 걸 모르면 한참을 헤맨다.
+# 그래서 화면 구석에 '고치는 사람용' 한 줄을 따로 띄운다.
+HINT_DEVICE_AUTH = "설정 오류: DEVICE_API_KEY 불일치 — backend/.env와 pi/.env를 같게 맞추고 데몬을 다시 켜세요"
+HINT_VERIFY_FAILED = "서버 응답을 처리하지 못했습니다 — ATM 데몬 터미널의 로그를 확인하세요"
+
 
 @dataclass
 class QrPayload:
@@ -139,6 +145,7 @@ class AtmController:
         self.summary: str = ""
         self.callcenter_resolution: str | None = None
         self.last_error: str | None = None
+        self.operator_hint: str | None = None
         self.offline: bool = False
 
     # ── 조회 ────────────────────────────────────────────────────────────────
@@ -165,6 +172,7 @@ class AtmController:
             "can_withdraw": self.state == STATE_WITHDRAW_ENABLED,
             "callcenter_resolution": self.callcenter_resolution,
             "last_error": self.last_error,
+            "operator_hint": self.operator_hint,
             "offline": self.offline,
         }
 
@@ -178,6 +186,7 @@ class AtmController:
         self.summary = ""
         self.callcenter_resolution = None
         self.last_error = None
+        self.operator_hint = None
         self.offline = False
 
     # ── QR 인식 ─────────────────────────────────────────────────────────────
@@ -202,6 +211,7 @@ class AtmController:
         self.summary = verified.get("summary") or ""
         self.callcenter_resolution = None  # 새 세션이므로 앞 사람의 확인 결과를 지운다
         self.last_error = None
+        self.operator_hint = None
 
         action = verified.get("action") or RISK_TO_ACTION.get(self.risk_level or "", ACTION_BLOCK)
         self.state = ACTION_TO_STATE.get(action, STATE_WITHDRAW_BLOCKED)
@@ -233,6 +243,7 @@ class AtmController:
             # 오프라인으로 넘어가지 않고 멈춘다 (키 오타 하나로 현금이 나가면 안 된다).
             logger.error("디바이스 인증 실패 — 설정을 고쳐야 합니다: %s", exc)
             self.last_error = ERROR_DEVICE_AUTH
+            self.operator_hint = HINT_DEVICE_AUTH
             return None
         except BackendUnavailableError as exc:
             # 여기가 유일한 백업 경로다 — 서버에 정말 닿지 못했을 때
@@ -244,6 +255,7 @@ class AtmController:
             # (ATM 전체가 죽지는 않게 잡되, 거래는 열지 않는다)
             logger.exception("서버 검증 중 예상하지 못한 오류: %s", exc)
             self.last_error = ERROR_VERIFY_FAILED
+            self.operator_hint = HINT_VERIFY_FAILED
             return None
 
         self.offline = False
@@ -300,6 +312,7 @@ class AtmController:
             # 폴링도 마찬가지다. '오프라인'이라고 표시하면 멀쩡한 서버를 뒤지게 된다.
             logger.error("디바이스 인증 실패 — 설정을 고쳐야 합니다: %s", exc)
             self.last_error = ERROR_DEVICE_AUTH
+            self.operator_hint = HINT_DEVICE_AUTH
             return self.snapshot()  # 제한은 그대로 유지된다
         except Exception as exc:  # noqa: BLE001
             logger.warning("세션 상태 폴링 실패: %s", exc)

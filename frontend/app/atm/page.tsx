@@ -180,9 +180,16 @@ export default function AtmScreen() {
       )}
 
       {state.last_error && (
-        <p role="alert" className="w-full rounded-2xl bg-amber-100 px-6 py-4 text-center text-2xl text-amber-900 break-keep">
-          {state.last_error}
-        </p>
+        <div role="alert" className="w-full rounded-2xl bg-amber-100 px-6 py-4 text-center break-keep">
+          <p className="text-2xl text-amber-900">{state.last_error}</p>
+          {/* 어르신께 드리는 안내와 고치는 사람에게 주는 단서를 분리한다.
+              작게 두어 시연을 방해하지 않으면서, 원인을 찾아 헤매지 않게 한다 */}
+          {state.operator_hint && (
+            <p className="mt-3 border-t border-amber-300 pt-3 font-mono text-sm text-amber-800">
+              {state.operator_hint}
+            </p>
+          )}
+        </div>
       )}
 
       <footer className="flex w-full flex-wrap items-center justify-between gap-4 pt-4 text-lg text-slate-500">

@@ -310,3 +310,35 @@ def test_real_outage_still_uses_documented_backup_path(
     assert snapshot["state"] == STATE_WITHDRAW_BLOCKED
     asyncio.run(controller.request_withdraw(500000))
     assert provider.dispense_count == 0
+
+
+def test_auth_failure_tells_the_operator_how_to_fix_it(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """화면만 보고도 무엇을 고쳐야 하는지 알 수 있어야 한다.
+
+    어르신용 안내에는 원인을 담지 않는다. 그런데 부스를 지키는 사람도 그 화면만
+    보고 있어서, 원인을 알려면 데몬 터미널을 봐야 한다는 걸 모르면 한참 헤맨다.
+    """
+    backend.auth_rejected = True
+    snapshot = asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+
+    hint = snapshot["operator_hint"] or ""
+    assert "DEVICE_API_KEY" in hint
+    assert "데몬" in hint, "고치고 나서 데몬을 다시 켜야 한다는 것까지 알려 준다"
+    # 어르신용 문구에는 여전히 기술 용어가 없다
+    assert "DEVICE_API_KEY" not in (snapshot["last_error"] or "")
+
+
+def test_operator_hint_clears_once_it_works_again(
+    controller: AtmController, backend: FakeBackend
+) -> None:
+    """설정을 고치면 단서도 사라진다 — 낡은 경고가 화면에 남으면 안 된다."""
+    backend.auth_rejected = True
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+    assert controller.snapshot()["operator_hint"]
+
+    backend.auth_rejected = False
+    snapshot = asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
+    assert snapshot["operator_hint"] is None
+    assert snapshot["state"] == STATE_WITHDRAW_ENABLED
