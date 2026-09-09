@@ -13,6 +13,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  *      자체가 그 '한 번 누르기'가 된다.
  *   2) 전시장이 시끄럽거나 옆 부스에 방해가 되면 꺼야 한다. 끌 수 있어야 한다.
  * 한 번 켜 두면 같은 브라우저에서는 계속 켜진 채로 남는다.
+ *
+ * 왜 이렇게 방어적으로 짰나:
+ *   speechSynthesis는 브라우저·기기마다 구현이 제각각이다. 있는 척만 하고
+ *   getVoices()에서 예외를 던지거나 addEventListener가 없는 구현이 실제로 있다.
+ *   여기서 예외가 새어 나가면 React가 화면 전체를 걷어내 **ATM 화면이 하얗게
+ *   빈다.** 이 화면은 전시의 핵심이므로, 음성이 안 되는 것보다 화면이 사라지는
+ *   쪽이 훨씬 나쁘다. 그래서 모든 호출을 감싸고, 실패하면 조용히 '지원 안 함'으로
+ *   내려앉는다.
  */
 
 const STORAGE_KEY = "smart-atm-voice";
@@ -21,7 +29,7 @@ const RATE = 0.9; // 기본 속도는 어르신이 따라오기에 빠르다
 const PITCH = 1;
 
 export interface Speech {
-  /** 이 브라우저가 음성 합성을 지원하는가 (마운트 후에 정해진다) */
+  /** 이 브라우저에서 실제로 소리를 낼 수 있는가 (마운트 후에 정해진다) */
   supported: boolean;
   /** 지금 소리를 낼 것인가 */
   enabled: boolean;
@@ -33,6 +41,29 @@ export interface Speech {
   announce: (key: string, text: string) => void;
 }
 
+/** 음성 합성을 쓸 수 있으면 돌려주고, 조금이라도 이상하면 null. */
+function getSynth(): SpeechSynthesis | null {
+  try {
+    if (typeof window === "undefined") return null;
+    if (!("speechSynthesis" in window)) return null;
+    if (typeof window.SpeechSynthesisUtterance !== "function") return null;
+    const synth = window.speechSynthesis;
+    return synth && typeof synth.speak === "function" ? synth : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 음성 관련 호출은 전부 이걸 통과시킨다. 실패해도 화면은 살아 있어야 한다. */
+function attempt(action: () => void): boolean {
+  try {
+    action();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readStored(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === "on";
@@ -42,11 +73,8 @@ function readStored(): boolean {
 }
 
 function writeStored(on: boolean): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, on ? "on" : "off");
-  } catch {
-    // 저장하지 못해도 이번 세션 동안은 동작한다
-  }
+  // 저장하지 못해도 이번 세션 동안은 동작한다
+  attempt(() => window.localStorage.setItem(STORAGE_KEY, on ? "on" : "off"));
 }
 
 export function useSpeech(): Speech {
@@ -58,35 +86,51 @@ export function useSpeech(): Speech {
   // localStorage와 speechSynthesis는 브라우저에만 있다 — 그려진 뒤에 확인한다
   // (서버에서 그린 화면과 어긋나지 않게).
   useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = getSynth();
+    if (!synth) return;
+
+    const pickVoice = () => {
+      // getVoices()에서 예외를 던지는 구현이 있다. 목소리를 못 고르면
+      // 기본 목소리로 읽으면 되므로 실패해도 그냥 넘어간다.
+      attempt(() => {
+        const voices = synth.getVoices();
+        voiceRef.current =
+          voices?.find((v) => v.lang?.toLowerCase().startsWith("ko")) ?? null;
+      });
+    };
+    pickVoice();
+
+    // 목록이 비어 있다가 나중에 채워지는 브라우저가 있다.
+    // 반대로 addEventListener 자체가 없는 구현도 있다 — 있을 때만 붙인다.
+    const canListen = typeof synth.addEventListener === "function";
+    if (canListen) attempt(() => synth.addEventListener("voiceschanged", pickVoice));
+
+    // 여기까지 왔으면 최소한 화면을 깨뜨리지 않고 쓸 수 있다
     setSupported(true);
     setEnabled(readStored());
 
-    const pickVoice = () => {
-      const voices = window.speechSynthesis.getVoices();
-      voiceRef.current = voices.find((v) => v.lang.toLowerCase().startsWith("ko")) ?? null;
-    };
-    pickVoice();
-    // 목록이 비어 있다가 나중에 채워지는 브라우저가 있다
-    window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
-
     return () => {
-      window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
-      window.speechSynthesis.cancel();
+      if (canListen) attempt(() => synth.removeEventListener("voiceschanged", pickVoice));
+      attempt(() => synth.cancel());
     };
   }, []);
 
   const speak = useCallback((text: string) => {
     const said = text.trim();
     if (!said) return;
-    // 앞 문장이 남아 있으면 끊는다 — 상태가 바뀌었는데 지난 안내를 계속 읽으면 안 된다
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(said);
-    utterance.lang = LANG;
-    utterance.rate = RATE;
-    utterance.pitch = PITCH;
-    if (voiceRef.current) utterance.voice = voiceRef.current;
-    window.speechSynthesis.speak(utterance);
+    const synth = getSynth();
+    if (!synth) return;
+
+    attempt(() => {
+      // 앞 문장이 남아 있으면 끊는다 — 상태가 바뀌었는데 지난 안내를 계속 읽으면 안 된다
+      synth.cancel();
+      const utterance = new window.SpeechSynthesisUtterance(said);
+      utterance.lang = LANG;
+      utterance.rate = RATE;
+      utterance.pitch = PITCH;
+      if (voiceRef.current) utterance.voice = voiceRef.current;
+      synth.speak(utterance);
+    });
   }, []);
 
   const announce = useCallback(
@@ -112,7 +156,7 @@ export function useSpeech(): Speech {
         // (켜는 조작 자체가 브라우저가 요구하는 '사람의 조작'을 만족시킨다)
         spokenKeyRef.current = null;
       } else {
-        window.speechSynthesis.cancel();
+        attempt(() => getSynth()?.cancel());
       }
       return next;
     });
