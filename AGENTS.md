@@ -33,6 +33,10 @@
 > `.agents/skills/qr-recognition-integration/SKILL.md`,
 > `.agents/skills/callcenter-session-integration/SKILL.md`를 참고한다.
 
+0. **ATM은 평상시 보통 ATM이다** — 아무 QR도 읽지 않은 상태에서 출금 화면이 떠 있고
+   돈이 나온다. ATM 앞에 선 사람은 이 앱을 쓴 당사자일 수도, 가족일 수도, 시스템과
+   아무 상관 없는 제삼자일 수도 있기 때문이다. 막는 대상은 '확인되지 않은 사람'이
+   아니라 **'위험이 확인된 세션'**이다 (PRD: "평범한 문자는 시스템이 건드리지 않는다")
 1. 사용자가 스마트폰/태블릿(Next.js `/messages`)에서 의심 문자를 고르거나 직접 입력한다
 2. 프론트엔드가 백엔드에 분석을 요청하면(`POST /api/v1/analysis`), 백엔드가 규칙 기반
    (추후 AI로 확장 가능)으로 `risk_level`/`risk_score`/`reasons`를 만들고
@@ -42,8 +46,12 @@
 4. ATM(라즈베리파이)이 카메라로 QR을 스캔해 `session_id`를 꺼내고,
    `GET /api/v1/atm/verify/{session_id}`로 **서버 검증**해 ALLOW/VERIFY/BLOCK을 받는다
    (PRD 6.2 — 위험 상세와 개인정보를 QR에 넣지 않는다)
-5. 서버에 닿지 못하면, QR에 `risk_level`이 함께 들어 있을 때만 로컬 판단으로 시연을
-   이어간다. 둘 다 없으면 **거래 제어 데이터로 쓰지 않고** 오류를 안내한다
+5. 로컬 판단으로 넘어가는 경우는 **서버에 닿지 못했을 때 하나뿐이다.** 그때 QR에
+   `risk_level`이 함께 들어 있으면 그 값으로 시연을 이어간다. 서버가 401(디바이스 키
+   거부)로 **대답을 한** 경우는 장애가 아니라 설정 오류이므로 로컬 판단으로 넘어가지
+   않는다 — 서버가 대답했는데 QR이 스스로 적어 온 등급을 믿으면 그건 검증이 아니고,
+   키 오타 하나로 위조 QR에 현금이 나간다. 확인하지 못한 경우에는 **거래를 열지 않고**
+   오류를 안내한다 (`확인 못 함 ≠ 안전함`)
 6. ATM이 스캔 결과를 보고하면(`POST /api/v1/atm/scan`) WebSocket으로 콜센터 화면에
    실시간 반영된다
 7. DANGER면 ATM이 콜센터 확인 상태(`CALL_CENTER`)로 전환하고,
@@ -51,6 +59,10 @@
 8. 콜센터가 정상 거래로 확인하면(`RELEASED`) 제한을 해제하고, 보이스피싱으로
    확인되면(`MAINTAINED`) 제한을 유지한다 — **경보성 디바이스 원칙(`db-rules.md`)과
    동일하게, 시스템이 스스로 풀지 않고 사람이 직접 확인해야 한다**
+9. 조작이 1분간 없으면 ATM은 대기 화면으로 돌아간다(`IDLE_RESET_SECONDS`). 앞사람이
+   남긴 차단 화면을 뒤에 온 사람이 물려받지 않게 하려는 것이며, **세션의 차단을 푸는
+   것이 아니다** — 차단은 서버에 남아 있고 같은 QR을 다시 비추면 즉시 다시 막힌다.
+   상담원 확인을 기다리는 동안(`CALL_CENTER`)에는 세지 않는다
 
 ## 확정된 판정 규칙 (PRD 5.2 / 9.3 — 임의로 바꾸지 않는다)
 
@@ -83,6 +95,7 @@
 ## 폴더 구조
 ```
 스마트-금융-보안-ATM/
+├── README.md           (저장소 첫 화면 — 무엇이고 무엇이 되는가)
 ├── AGENTS.md
 ├── pytest.ini          (backend/pi 테스트를 한 번에 돌린다)
 ├── .agents/            (하네스: rules/skills/workflows/hooks/agents — 이미 완성됨)
@@ -95,7 +108,10 @@
 │   ├── security/       JWT(사용자향) · 디바이스 API 키(디바이스향)
 │   └── tests/          규칙 엔진 · API 통합 테스트
 ├── frontend/           (Next.js)
-│   └── app/            / · /login · /messages · /result/[id] · /atm · /callcenter
+│   ├── app/            / · /login · /messages · /result/[id] · /atm · /callcenter
+│   │                   (app/atm/error.tsx — ATM 화면이 하얗게 비지 않게 하는 안전망)
+│   ├── components/     RiskBadge · QrPanel · VoiceToggle 등
+│   └── hooks/          useSpeech(음성 안내) · useAtmSocket(실시간)
 ├── vision/             (PC 웹캠으로 QR 인식을 먼저 검증할 때만 사용, 필수 아님)
 ├── pi/                 (라즈베리파이 — QR 인식 + 현금 배출 제어 + 로컬 화면 API)
 └── scripts/            (demo_e2e.py — 통합 시연 자동 검증)
