@@ -60,9 +60,16 @@ DISPENSER_DISPENSING = "DISPENSING"
 # 이 파일에서는 '제한 유지' 쪽만 직접 구분하면 된다
 RESOLUTION_MAINTAINED = "MAINTAINED"
 
+# 출금이 되는 상태들. READY가 여기 들어 있는 것이 이 기계의 성격을 정한다 —
+# ATM은 공용 기계다. 지금 그 앞에 선 사람은 앱을 쓴 당사자일 수도, 가족일 수도,
+# 이 시스템과 아무 상관 없는 사람일 수도 있다. QR을 못 내민다고 출금을 막으면
+# 그건 ATM이 아니라 QR 판독기다. 평상시에는 그냥 돈이 나오고, **위험이 확인된
+# 세션에서만** 막는다 (PRD: "평범한 문자는 시스템이 건드리지 않는다").
+DISPENSING_STATES: frozenset[str] = frozenset({STATE_READY, STATE_WITHDRAW_ENABLED})
+
 # 노약자용 큰 글씨 안내 문구 (FR-10) — 화면은 이 문구를 그대로 크게 띄운다
 GUIDANCE: dict[str, str] = {
-    STATE_READY: "휴대폰 화면의 QR 코드를 카메라에 보여 주세요",
+    STATE_READY: "출금하실 금액을 선택해 주세요",
     STATE_WITHDRAW_ENABLED: "출금하실 금액을 선택해 주세요",
     STATE_WITHDRAW_BLOCKED: "보이스피싱 위험이 확인되어 현금 출금을 잠시 멈췄습니다",
     STATE_CALL_CENTER: "상담원이 확인 중입니다. 잠시만 기다려 주세요",
@@ -150,6 +157,24 @@ class AtmController:
 
     # ── 조회 ────────────────────────────────────────────────────────────────
     @property
+    def can_dispense(self) -> bool:
+        """지금 이 사람에게 현금을 내줘도 되는가.
+
+        두 가지를 함께 본다.
+
+        1) 상태 — 위험이 확인된 세션(BLOCKED/CALL_CENTER)은 당연히 안 된다.
+        2) 확인 실패 여부 — 누군가 QR을 내밀었는데 우리가 확인하지 못한 경우
+           (등록되지 않은 QR, 디바이스 키 오류, 원인 불명)에는 내주지 않는다.
+           확인을 못 했다는 것은 '안전하다'는 뜻이 아니다. 특히 키 설정이 틀려
+           서버에 못 물어보는 상태라면 위험한 세션도 통과시키게 되므로, 보호
+           장치가 꺼진 채 돈이 나가는 일만은 막아야 한다.
+
+        아무도 확인을 요청하지 않은 평상시(READY, 오류 없음)에는 보통 ATM처럼
+        돈이 나온다 — 지나가던 제삼자까지 막지 않기 위해서다.
+        """
+        return self.state in DISPENSING_STATES and self.last_error is None
+
+    @property
     def guidance(self) -> str:
         """지금 화면에 크게 띄울 안내 문구."""
         if (
@@ -169,7 +194,7 @@ class AtmController:
             "reasons": self.reasons,
             "summary": self.summary,
             "guidance": self.guidance,
-            "can_withdraw": self.state == STATE_WITHDRAW_ENABLED,
+            "can_withdraw": self.can_dispense,
             "callcenter_resolution": self.callcenter_resolution,
             "last_error": self.last_error,
             "operator_hint": self.operator_hint,
@@ -276,8 +301,12 @@ class AtmController:
 
     # ── 출금 ────────────────────────────────────────────────────────────────
     async def request_withdraw(self, amount: int | None = None) -> dict[str, Any]:
-        """출금 버튼 처리. 여기가 FR-09를 지키는 유일한 관문이다."""
-        if self.state != STATE_WITHDRAW_ENABLED:
+        """출금 버튼 처리. 여기가 FR-09를 지키는 유일한 관문이다.
+
+        막는 것은 '위험이 확인된 세션'이지 '확인되지 않은 사람'이 아니다.
+        평상시(READY)에는 보통 ATM처럼 돈이 나온다.
+        """
+        if not self.can_dispense:
             # 액추에이터를 아예 건드리지 않는다 — 배출 장치는 움직이지 않는다
             logger.info("출금 차단 (state=%s, session=%s)", self.state, self.session_id)
             await self._report_withdraw(dispensed=False)

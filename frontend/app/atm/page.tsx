@@ -122,20 +122,22 @@ export default function AtmScreen() {
         </p>
       )}
 
-      {state.state === "READY" && (
-        <>
-          <QrCode size={96} className="text-sky-700" aria-hidden />
-          <p className="text-4xl font-bold leading-snug text-slate-900 break-keep">
-            {state.guidance}
-          </p>
-        </>
-      )}
-
-      {state.state === "WITHDRAW_ENABLED" && (
+      {/* ATM은 공용 기계다. 평상시에는 보통 ATM처럼 돈이 나오고, 위험이 확인된
+          세션에서만 막는다. QR을 못 내민다고 막으면 이 시스템과 아무 상관 없는
+          사람까지 출금하지 못한다 */}
+      {state.can_withdraw && (
         <>
           <Banknote size={80} className="text-emerald-600" aria-hidden />
-          <p className="text-4xl font-bold text-slate-900">{state.guidance}</p>
+          <p className="text-4xl font-bold text-slate-900 break-keep">{state.guidance}</p>
           <AmountGrid onSelect={withdraw} />
+
+          {/* 아직 아무 QR도 읽지 않은 평상시에만, 이 기계가 무엇을 더 할 수 있는지 알린다 */}
+          {state.state === "READY" && (
+            <p className="flex items-center gap-3 text-xl text-slate-500 break-keep">
+              <QrCode size={26} className="shrink-0 text-sky-700" aria-hidden />
+              보이스피싱 검사 QR이 있으시면 카메라에 보여 주세요
+            </p>
+          )}
         </>
       )}
 

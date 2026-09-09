@@ -342,3 +342,64 @@ def test_operator_hint_clears_once_it_works_again(
     snapshot = asyncio.run(controller.handle_qr(f'{{"session_id": "{SAFE_SESSION}"}}'))
     assert snapshot["operator_hint"] is None
     assert snapshot["state"] == STATE_WITHDRAW_ENABLED
+
+
+# ── ATM은 공용 기계다 (평상시 출금 가능) ─────────────────────────────────────
+def test_atm_dispenses_before_anyone_shows_a_qr(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """QR을 내밀지 않은 사람도 보통 ATM처럼 돈을 찾을 수 있어야 한다.
+
+    지금 ATM 앞에 선 사람은 앱을 쓴 당사자일 수도, 가족일 수도, 이 시스템과
+    아무 상관 없는 사람일 수도 있다. QR이 없다고 막으면 그건 ATM이 아니라
+    QR 판독기다 — PRD의 "평범한 문자는 시스템이 건드리지 않는다"와도 어긋난다.
+    """
+    snapshot = controller.snapshot()
+    assert snapshot["state"] == STATE_READY
+    assert snapshot["can_withdraw"] is True
+    assert "출금" in snapshot["guidance"]
+
+    result = asyncio.run(controller.request_withdraw(50000))
+    assert result["dispensed"] is True
+    assert provider.dispense_count == 1
+
+
+def test_danger_still_blocks_after_the_default_changed(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """평상시를 열어 줬다고 해서 FR-09가 흔들리면 안 된다."""
+    asyncio.run(controller.handle_qr(f'{{"session_id": "{DANGER_SESSION}"}}'))
+    assert controller.snapshot()["can_withdraw"] is False
+
+    for _ in range(3):
+        assert asyncio.run(controller.request_withdraw(500000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_unresolved_check_does_not_dispense(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """확인을 요청했는데 확인하지 못했다면 내주지 않는다.
+
+    '확인 못 함'은 '안전함'이 아니다. 등록되지 않은 QR을 내민 사람에게 그냥
+    돈을 내주면, 보호 장치가 꺼진 것을 아무도 모른 채 지나간다.
+    """
+    asyncio.run(controller.handle_qr('{"session_id": "VP-999999"}'))
+    assert controller.snapshot()["state"] == STATE_READY  # 상태는 평상시 그대로지만
+    assert controller.snapshot()["can_withdraw"] is False  # 확인 실패가 남아 있다
+
+    assert asyncio.run(controller.request_withdraw(50000))["dispensed"] is False
+    assert provider.dispense_count == 0
+
+
+def test_reset_returns_the_machine_to_the_next_customer(
+    controller: AtmController, provider: MockDeviceProvider
+) -> None:
+    """'처음으로'를 누르면 다음 사람은 평범한 ATM을 만난다."""
+    asyncio.run(controller.handle_qr('{"session_id": "VP-999999"}'))
+    assert controller.snapshot()["can_withdraw"] is False
+
+    controller.reset()
+    assert controller.snapshot()["can_withdraw"] is True
+    assert asyncio.run(controller.request_withdraw(50000))["dispensed"] is True
+    assert provider.dispense_count == 1
